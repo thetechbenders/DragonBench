@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DragonBench event",
+  "type": "object",
+  "required": ["schema", "event", "seq", "uptime_ms", "target", "firmware_version"],
+  "properties": {
+    "schema": {"const": 1},
+    "event": {"enum": ["boot", "ready", "phase_start", "phase_end", "fault", "reset_reason", "run_complete"]},
+    "run_id": {"type": "string"},
+    "phase": {"type": "string"},
+    "seq": {"type": "integer", "minimum": 1},
+    "uptime_ms": {"type": "integer", "minimum": 0},
+    "result": {"enum": ["pass", "fail", "aborted", "unsupported"]},
+    "parameters": {"type": "object"},
+    "metrics": {"type": "object"},
+    "target": {"const": "esp32s3-super-mini"},
+    "firmware_version": {"type": "string"}
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,23 @@
+<!doctype html>
+<meta name="viewport" content="width=device-width">
+<title>DragonBench</title>
+<style>
+body{font:16px system-ui;max-width:900px;margin:2rem auto;padding:0 1rem;background:#111;color:#eee}
+.banner{padding:1rem;background:#701;color:white;font-weight:800}pre{background:#222;padding:1rem;overflow:auto}.absent{color:#7f7}
+</style>
+<div class="banner">DRAGONBENCH CHARACTERIZATION IMAGE<br>NO PRODUCT ACTUATOR SUPPORT</div>
+<h1>DragonBench</h1>
+<p class="absent">Heater capability: ABSENT<br>Fan-control capability: ABSENT</p>
+<p>Target: ESP32-S3 Super Mini · Firmware: 0.1.0</p>
+<h2>Status</h2><pre id="status">loading</pre>
+<h2>Sensors</h2><pre id="sensors">loading</pre>
+<h2>Workloads</h2><pre id="workloads">loading</pre>
+<script>
+async function get(name){return (await fetch('/api/v1/'+name)).json()}
+async function update(){
+  status.textContent=JSON.stringify(await get('status'),null,2)
+  sensors.textContent=JSON.stringify(await get('sensors'),null,2)
+  workloads.textContent=JSON.stringify(await get('workloads'),null,2)
+}
+update();setInterval(update,2000)
+</script>

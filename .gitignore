@@ -1,0 +1,11 @@
+build/
+test_db_run
+managed_components/
+sdkconfig
+sdkconfig.old
+dependencies.lock
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+artifacts/

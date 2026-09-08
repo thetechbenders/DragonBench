@@ -1,0 +1,39 @@
+openapi: 3.0.3
+info:
+  title: DragonBench API
+  version: 0.1.0
+paths:
+  /api/v1/device:
+    get: {summary: Device identity and immutable product boundary}
+  /api/v1/status:
+    get: {summary: Current run, network, uptime, and reset state}
+  /api/v1/sensors:
+    get: {summary: Truthful DUT signal registry}
+  /api/v1/workloads:
+    get: {summary: Supported and unsupported workload registry}
+  /api/v1/runs:
+    post:
+      summary: Start one validated workload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workload]
+              properties:
+                workload: {type: string}
+                duration_ms: {type: integer, minimum: 1, maximum: 3600000}
+                host: {type: string, maxLength: 253}
+                port: {type: integer, minimum: 1, maximum: 65535}
+                rate_bps: {type: integer, minimum: 0}
+  /api/v1/runs/{id}:
+    get:
+      summary: Read one run
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+  /api/v1/runs/{id}/abort:
+    post:
+      summary: Request cooperative abort
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+  /api/v1/events:
+    get: {summary: Snapshot event stream as application/x-ndjson}

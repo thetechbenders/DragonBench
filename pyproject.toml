@@ -1,0 +1,15 @@
+[project]
+name = "dragonbench-cli"
+version = "0.1.0"
+requires-python = ">=3.10"
+description = "Host CLI for the DragonBench electrical characterization harness"
+
+[project.scripts]
+dragonbench = "cli.dragonbench.main:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["cli*"]

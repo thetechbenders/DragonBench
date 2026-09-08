@@ -1,0 +1,14 @@
+menu "DragonBench"
+config DB_WIFI_SSID
+    string "Wi-Fi SSID"
+    default ""
+config DB_WIFI_PASSWORD
+    string "Wi-Fi password"
+    default ""
+config DB_HOSTNAME
+    string "mDNS hostname"
+    default "dragonbench"
+config DB_FIRMWARE_VERSION
+    string "Firmware version"
+    default "0.1.0"
+endmenu
