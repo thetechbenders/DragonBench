@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  esp32s3-build:
+    name: ESP-IDF 5.3.5 / ESP32-S3
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Clean configure and build
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.3.5
+          target: esp32s3
+          path: .
+          command: bash ci/build-esp32s3.sh
+
+  python-host:
+    name: Python host contracts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+      - name: Compile Python sources
+        run: python -m compileall -q cli tests
+      - name: Verify invalid input returns exit 2
+        shell: bash
+        run: |
+          set +e
+          python -m cli.dragonbench run IDLE --duration 0
+          status=$?
+          set -e
+          test "$status" -eq 2
+
+  native-c:
+    name: Native C state machine
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Compile with warnings and sanitizers
+        run: >-
+          gcc -std=c11 -Wall -Wextra -Wpedantic -Werror
+          -fsanitize=address,undefined -fno-omit-frame-pointer
+          -Ifirmware/common/include
+          firmware/common/db_run.c tests/native/test_db_run.c
+          -o test_db_run
+      - name: Execute state-machine test
+        run: ./test_db_run

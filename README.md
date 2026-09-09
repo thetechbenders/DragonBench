@@ -54,13 +54,24 @@ and [protocol contract](protocol/openapi.yaml).
 
 ## Validation status
 
-The ESP32-S3 image builds natively with ESP-IDF 5.3.5. Hardware flashing and
-electrical characterization have not been performed. A successful build does
-not establish module current demand, rail limits, brownout margin, or product
-safety thresholds; those remain external bench evidence.
+Implemented are the standalone ESP32-S3 characterization firmware, versioned
+API, browser UI, host CLI, deterministic workloads, and native host
+state-machine tests. The ESP32-S3 image builds with ESP-IDF 5.3.5, and the host
+contract and native C tests pass.
+
+Hardware flashing, Super Mini runtime behavior, on-device Wi-Fi/mDNS, workload
+execution, and electrical current or rail characterization have not been
+validated. A successful build does not establish module current demand, rail
+limits, brownout margin, or product safety thresholds; those remain external
+bench evidence.
 
 ## Scope rule
 
 A workload belongs here only when it answers a concrete electrical
 characterization question for a real target. Unsupported behavior is reported
 explicitly; it is never silently skipped.
+
+## Support
+
+If DragonBench is useful to you, you can [support development on
+Ko-fi](https://ko-fi.com/opinion_panda).
