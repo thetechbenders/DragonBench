@@ -16,7 +16,11 @@ all voltage/current evidence remains owned by external instruments.
 
 ## Quick start
 
-ESP-IDF 5.4 or newer is expected. Configure Wi-Fi without committing credentials:
+The ESP32-S3 target is validated with ESP-IDF 5.3.5 and xtensa-esp-elf GCC
+13.2.0. That is the current validated component floor, not evidence that older
+ESP-IDF releases are incompatible; the minimum supported version has not yet
+been established. The external `espressif/mdns` component is pinned to the
+validated 1.12.0 release. Configure Wi-Fi without committing credentials:
 
 ```text
 idf.py set-target esp32s3
@@ -47,6 +51,13 @@ python -m cli.dragonbench traffic-peer --port 5001 --mode echo --duration 60
 
 See [bench workflow](docs/BENCH_WORKFLOW.md), [target profile](docs/TARGET_ESP32S3.md),
 and [protocol contract](protocol/openapi.yaml).
+
+## Validation status
+
+The ESP32-S3 image builds natively with ESP-IDF 5.3.5. Hardware flashing and
+electrical characterization have not been performed. A successful build does
+not establish module current demand, rail limits, brownout margin, or product
+safety thresholds; those remain external bench evidence.
 
 ## Scope rule
 

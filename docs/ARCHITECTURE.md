@@ -17,3 +17,9 @@ The v1 firmware has no dependency on dragon-core. Reusing it would currently add
 product-oriented surface area without reducing the small target implementation.
 This decision can be revisited for a specific neutral service, with its commit
 pin and scope documented before adoption.
+
+The ESP32-S3 target directly declares its ESP-IDF component dependencies and
+uses the external `espressif/mdns` component pinned at 1.12.0. The checked-in
+Component Manager lockfile records the resolved ESP-IDF 5.3.5/ESP32-S3 graph;
+generated configuration and downloaded component sources are not repository
+inputs.
