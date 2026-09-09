@@ -1,6 +1,10 @@
 # ESP32-S3 target profile
 
 - Target: ESP32-S3, Super Mini class
+- Observed silicon revision: v0.2
+- Embedded flash: 4 MB
+- Embedded PSRAM: 2 MB, Quad SPI
+- Observed USB path: USB Serial/JTAG
 - Validated framework: ESP-IDF 5.3.5
 - Validated compiler: xtensa-esp-elf GCC 13.2.0
 - Current target-component constraint: ESP-IDF >=5.3.5; this records the
@@ -27,5 +31,17 @@ capacity, not a second DragonBench interface. Generated `sdkconfig` and
 `managed_components/` remain local; the Component Manager lockfile is tracked
 to preserve the dependency graph used by the validated build.
 
-Native build validation does not constitute a hardware flash or electrical
-characterization result. Neither has been performed for v0.1.0.
+The first hardware flash completed and its image hashes verified over USB
+Serial/JTAG, but that initial attempt entered ROM download mode
+(`DOWNLOAD(USB/UART0)`, `waiting for download`). After correcting the flash and
+PSRAM configuration and fitting the partition table to the physical device, a
+fresh flash hard-reset automatically into `SPI_FAST_FLASH_BOOT`. The application
+loaded from `ota_0`, detected and successfully tested 2 MB of PSRAM, and reached
+the DragonBench `ready` event without manual BOOT-button intervention. It then
+remained stable under observation with no panic, watchdog, brownout, or reset.
+On-device Wi-Fi/mDNS connectivity, API calls over Wi-Fi, workloads, and
+electrical characterization have not yet been validated.
+
+The 4 MB layout uses two 1.5 MB OTA app slots so the inactive-partition workload
+has a real target, plus a 512 KB scratch partition. There is no factory app
+partition. The exact layout is maintained in `partitions.csv`.
