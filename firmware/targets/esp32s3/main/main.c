@@ -470,8 +470,6 @@ static const char landing[] =
 static esp_err_t landing_get(httpd_req_t *req) { httpd_resp_set_type(req, "text/html"); return httpd_resp_send(req, landing, HTTPD_RESP_USE_STRLEN); }
 
 static void start_http(void) {
-    httpd_config_t config = HTTPD_DEFAULT_CONFIG(); config.uri_match_fn = httpd_uri_match_wildcard;
-    httpd_handle_t server = NULL; ESP_ERROR_CHECK(httpd_start(&server, &config));
     const httpd_uri_t routes[] = {
         {.uri="/",.method=HTTP_GET,.handler=landing_get}, {.uri="/api/v1/device",.method=HTTP_GET,.handler=device_get},
         {.uri="/api/v1/status",.method=HTTP_GET,.handler=status_get}, {.uri="/api/v1/sensors",.method=HTTP_GET,.handler=sensors_get},
@@ -479,14 +477,21 @@ static void start_http(void) {
         {.uri="/api/v1/runs/*/abort",.method=HTTP_POST,.handler=abort_post}, {.uri="/api/v1/runs/*",.method=HTTP_GET,.handler=run_get},
         {.uri="/api/v1/events",.method=HTTP_GET,.handler=events_get},
     };
+    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    config.uri_match_fn = httpd_uri_match_wildcard;
+    config.max_uri_handlers = sizeof(routes) / sizeof(routes[0]);
+    httpd_handle_t server = NULL; ESP_ERROR_CHECK(httpd_start(&server, &config));
     for (size_t i = 0; i < sizeof(routes)/sizeof(routes[0]); ++i) ESP_ERROR_CHECK(httpd_register_uri_handler(server, &routes[i]));
 }
 
 static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
     (void)arg;
     (void)data;
-    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) esp_wifi_connect();
-    else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) { wifi_connected = false; esp_wifi_connect(); }
+    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START && CONFIG_DB_WIFI_SSID[0] != '\0') esp_wifi_connect();
+    else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        wifi_connected = false;
+        if (CONFIG_DB_WIFI_SSID[0] != '\0') esp_wifi_connect();
+    }
     else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         wifi_connected = true;
         wifi_ap_record_t record;
@@ -503,7 +508,7 @@ static void start_wifi(void) {
     wifi_config_t config = {0};
     snprintf((char *)config.sta.ssid, sizeof(config.sta.ssid), "%s", CONFIG_DB_WIFI_SSID);
     snprintf((char *)config.sta.password, sizeof(config.sta.password), "%s", CONFIG_DB_WIFI_PASSWORD);
-    config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    config.sta.threshold.authmode = CONFIG_DB_WIFI_PASSWORD[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA)); ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &config)); ESP_ERROR_CHECK(esp_wifi_start());
 }
 
