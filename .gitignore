@@ -1,9 +1,9 @@
 build/
 test_db_run
+test_db_run.exe
 managed_components/
 sdkconfig
 sdkconfig.old
-dependencies.lock
 __pycache__/
 *.py[cod]
 .venv/

@@ -1,4 +1,3 @@
-#include <errno.h>
 #include <inttypes.h>
 #include <netdb.h>
 #include <stdio.h>
@@ -9,7 +8,6 @@
 #include "cJSON.h"
 #include "db_run.h"
 #include "driver/temperature_sensor.h"
-#include "esp_app_desc.h"
 #include "esp_attr.h"
 #include "esp_event.h"
 #include "esp_http_server.h"

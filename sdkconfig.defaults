@@ -8,4 +8,9 @@ CONFIG_ESP_TASK_WDT_INIT=y
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
 CONFIG_LWIP_MAX_SOCKETS=16
-CONFIG_MDNS_MAX_INTERFACES=1
+# DragonBench creates only the Wi-Fi STA netif. mDNS 1.12.0 duplicate-interface
+# handling requires capacity for two entries even with one predefined netif.
+CONFIG_MDNS_MAX_INTERFACES=2
+CONFIG_MDNS_PREDEF_NETIF_STA=y
+# CONFIG_MDNS_PREDEF_NETIF_AP is not set
+# CONFIG_MDNS_PREDEF_NETIF_ETH is not set
