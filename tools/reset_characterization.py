@@ -31,6 +31,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -195,6 +196,16 @@ class SerialMonitor:
         self.ser.close()
 
 
+def now_iso() -> str:
+    """Absolute wall-clock timestamp for event/session records: timezone-aware
+    UTC ISO 8601 (e.g. "2026-09-12T15:09:51.386+00:00"). All future
+    DragonBench characterization tooling should record absolute timestamps
+    this way, not with a naive time.strftime() call -- see
+    phase2_monitor.py's now_iso(), which already used this convention.
+    Existing historical artifacts recorded before this fix are untouched."""
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+
+
 def strip_ansi(text: str) -> str:
     return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
@@ -304,7 +315,7 @@ def run_event(mon: SerialMonitor, host: str, index: int, reset_class: str,
         uptime_before_ms = None
 
     t0 = time.monotonic()
-    trigger_wall = time.strftime("%Y-%m-%dT%H:%M:%S")
+    trigger_wall = now_iso()
     trigger_fn()
 
     poll_result: dict = {}

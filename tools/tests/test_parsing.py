@@ -19,10 +19,12 @@ from __future__ import annotations
 
 import sys
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from reset_characterization import analyze_capture  # noqa: E402
+from reset_characterization import analyze_capture, now_iso  # noqa: E402
+import phase2_monitor  # noqa: E402
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -112,6 +114,34 @@ class DuplicateAndAnomalyTests(unittest.TestCase):
         # markers, so a healthy boot line must never trip these flags --
         # guard against the wdt regex accidentally matching the rst: line.
         self.assertEqual(result["rom_boot_raw"], "0x8")
+
+
+class AbsoluteTimestampConventionTests(unittest.TestCase):
+    """All future DragonBench characterization tooling records absolute
+    wall-clock timestamps as timezone-aware UTC ISO 8601, not a naive
+    time.strftime() string. Earlier captures (the original Phase 1 pass and
+    the 100-event unattended run) used naive local-time strings while Phase 2
+    used explicit UTC from the start; those existing artifacts are untouched
+    historical evidence, and this test only governs what new tooling code
+    produces going forward."""
+
+    def _assert_is_timezone_aware_utc_iso8601(self, ts: str):
+        parsed = datetime.fromisoformat(ts)
+        self.assertIsNotNone(parsed.tzinfo, f"{ts!r} parsed as timezone-naive")
+        self.assertEqual(parsed.utcoffset().total_seconds(), 0, f"{ts!r} is not UTC")
+
+    def test_reset_characterization_now_iso_is_timezone_aware_utc(self):
+        self._assert_is_timezone_aware_utc_iso8601(now_iso())
+
+    def test_phase2_monitor_now_iso_is_timezone_aware_utc(self):
+        self._assert_is_timezone_aware_utc_iso8601(phase2_monitor.now_iso())
+
+    def test_both_now_iso_helpers_agree_on_convention(self):
+        # Not asserting identical microsecond values (they're called at
+        # different instants) -- just that both produce the same shape.
+        a, b = now_iso(), phase2_monitor.now_iso()
+        for ts in (a, b):
+            self.assertRegex(ts, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\+00:00$")
 
 
 if __name__ == "__main__":
