@@ -10,10 +10,10 @@ It is not JumpJet or DragonBreath firmware, a performance benchmark, a generic
 HAL, a device-control application, or an authority for product safety limits.
 The firmware contains no heater or fan GPIOs and exposes no actuator API.
 
-Version 0.1.0 targets the observed ESP32-S3 Super Mini hardware: ESP32-S3 rev
-v0.2 with 4 MB embedded flash and 2 MB embedded Quad SPI PSRAM. Browser and CLI
-clients use the same versioned HTTP/JSON API. DUT events identify workload
-boundaries; all voltage/current evidence remains owned by external instruments.
+Version 0.1.0 targets ESP32-S3 N8R8 module hardware: 8 MB embedded flash and
+8 MB embedded Octal SPI PSRAM. Browser and CLI clients use the same versioned
+HTTP/JSON API. DUT events identify workload boundaries; all voltage/current
+evidence remains owned by external instruments.
 
 ## Quick start
 
@@ -60,14 +60,14 @@ API, browser UI, host CLI, deterministic workloads, and native host
 state-machine tests. The ESP32-S3 image builds with ESP-IDF 5.3.5, and the host
 contract and native C tests pass.
 
-USB Serial/JTAG flashing and normal application boot have been validated on the
-observed Super Mini. The corrected image boots automatically from SPI flash,
-detects and tests the 2 MB PSRAM, and reaches the DragonBench ready state without
-manual BOOT-button intervention. On-device Wi-Fi/mDNS, workload execution, and
-electrical current or rail characterization remain unvalidated. A successful
-build, flash, or boot does not establish module current demand, rail limits,
-brownout margin, or product safety thresholds; those remain external bench
-evidence.
+Flashing (via an external CH9102 USB-UART bridge) and normal application boot
+have been validated on the observed N8R8 module. The image boots automatically
+from SPI flash, detects and tests the 8 MB Octal SPI PSRAM, and reaches the
+DragonBench ready state without manual BOOT-button intervention. On-device
+Wi-Fi/mDNS, workload execution, and electrical current or rail
+characterization remain unvalidated. A successful build, flash, or boot does
+not establish module current demand, rail limits, brownout margin, or product
+safety thresholds; those remain external bench evidence.
 
 ## Scope rule
 
