@@ -7,9 +7,12 @@
   bootloader
 - Embedded PSRAM: 8 MB, Octal SPI, AP vendor, generation 3 die, running at
   80 MHz
-- Observed USB path: external WCH CH9102 USB-UART bridge (enumerated as a
+- Observed USB path: external WCH CH343P USB-UART bridge (enumerated as a
   generic "USB Serial Device"), not the chip's native USB Serial/JTAG
-  peripheral used by the previous Super Mini board
+  peripheral used by the previous Super Mini board. Chip identity confirmed
+  by physical inspection of the package marking ("WCH CH343P"); the earlier
+  CH9102 identification was incorrect and could not be distinguished from
+  CH343 by USB descriptor alone.
 - Validated framework for this characterization run: ESP-IDF 5.3.1 (build,
   flash, and boot exercised on this module using this version)
 - Validated compiler: xtensa-esp-elf GCC 13.2.0
@@ -47,7 +50,7 @@ exercised on physical hardware: the device booted automatically into
 `SPI_FAST_FLASH_BOOT`, detected the 8 MB Octal PSRAM device, and passed the
 ESP-IDF SPI SRAM memory test without manual BOOT-button intervention.
 
-USB flashing (via the external CH9102 bridge) and normal application boot
+USB flashing (via the external CH343P bridge) and normal application boot
 have been validated on this module. The image flashed with
 verified hashes, hard-reset automatically, detected and successfully tested
 the 8 MB PSRAM, and reached the DragonBench `ready` event with no panic,

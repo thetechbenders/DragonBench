@@ -60,7 +60,7 @@ API, browser UI, host CLI, deterministic workloads, and native host
 state-machine tests. The ESP32-S3 image builds with ESP-IDF 5.3.5, and the host
 contract and native C tests pass.
 
-Flashing (via an external CH9102 USB-UART bridge) and normal application boot
+Flashing (via an external CH343P USB-UART bridge) and normal application boot
 have been validated on the observed N8R8 module. The image boots automatically
 from SPI flash, detects and tests the 8 MB Octal SPI PSRAM, and reaches the
 DragonBench ready state without manual BOOT-button intervention. On-device
