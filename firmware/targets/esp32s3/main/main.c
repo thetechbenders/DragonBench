@@ -77,7 +77,7 @@ static void emit_event(const char *event, const char *phase, const char *run_id,
     cJSON_AddStringToObject(root, "event", event);
     cJSON_AddNumberToObject(root, "seq", (double)++event_seq);
     cJSON_AddNumberToObject(root, "uptime_ms", (double)uptime_ms());
-    cJSON_AddStringToObject(root, "target", "esp32s3-super-mini");
+    cJSON_AddStringToObject(root, "target", "esp32s3-n8r8");
     cJSON_AddStringToObject(root, "firmware_version", CONFIG_DB_FIRMWARE_VERSION);
     if (phase) cJSON_AddStringToObject(root, "phase", phase);
     if (run_id && run_id[0]) cJSON_AddStringToObject(root, "run_id", run_id);
@@ -289,7 +289,7 @@ static esp_err_t send_json(httpd_req_t *req, cJSON *root, int status) {
 static cJSON *identity_json(void) {
     cJSON *o = cJSON_CreateObject();
     cJSON_AddStringToObject(o, "product", "DragonBench");
-    cJSON_AddStringToObject(o, "target", "esp32s3-super-mini");
+    cJSON_AddStringToObject(o, "target", "esp32s3-n8r8");
     cJSON_AddStringToObject(o, "firmware_version", CONFIG_DB_FIRMWARE_VERSION);
     cJSON_AddStringToObject(o, "image_class", "characterization");
     cJSON_AddBoolToObject(o, "heater_capability", false);
@@ -463,7 +463,7 @@ static const char landing[] =
 "<style>body{font:16px system-ui;max-width:900px;margin:2rem auto;padding:0 1rem;background:#111;color:#eee}.banner{padding:1rem;background:#701;color:white;font-weight:800}pre{background:#222;padding:1rem;overflow:auto}.absent{color:#7f7}</style>"
 "<div class=banner>DRAGONBENCH CHARACTERIZATION IMAGE<br>NO PRODUCT ACTUATOR SUPPORT</div>"
 "<h1>DragonBench</h1><p class=absent>Heater capability: ABSENT<br>Fan-control capability: ABSENT</p>"
-"<p>Target: ESP32-S3 Super Mini · Firmware: " CONFIG_DB_FIRMWARE_VERSION "</p>"
+"<p>Target: ESP32-S3 N8R8 · Firmware: " CONFIG_DB_FIRMWARE_VERSION "</p>"
 "<h2>Status</h2><pre id=s>loading</pre><h2>Sensors</h2><pre id=n>loading</pre><h2>Workloads</h2><pre id=w>loading</pre>"
 "<script>async function g(p){return (await fetch('/api/v1/'+p)).json()}async function u(){s.textContent=JSON.stringify(await g('status'),null,2);n.textContent=JSON.stringify(await g('sensors'),null,2);w.textContent=JSON.stringify(await g('workloads'),null,2)}u();setInterval(u,2000)</script>";
 
