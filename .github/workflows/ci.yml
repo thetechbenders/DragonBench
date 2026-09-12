@@ -34,10 +34,14 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      - name: Install tooling dependencies
+        run: pip install -r tools/requirements.txt
       - name: Run tests
         run: python -m unittest discover -s tests -v
+      - name: Run reset characterization tooling tests
+        run: python -m unittest tools.tests.test_parsing -v
       - name: Compile Python sources
-        run: python -m compileall -q cli tests
+        run: python -m compileall -q cli tests tools
       - name: Verify invalid input returns exit 2
         shell: bash
         run: |
