@@ -1,0 +1,56 @@
+[0;32mI (790) esp_psram: SPI SRAM memory test OK[0m
+[0;32mI (799) cpu_start: Pro cpu start user code[0m
+[0;32mI (799) cpu_start: cpu freq: 160000000 Hz[0m
+[0;32mI (799) app_init: Application information:[0m
+[0;32mI (802) app_init: Project name:     dragonbench[0m
+[0;32mI (807) app_init: App version:      184ff53-dirty[0m
+[0;32mI (812) app_init: Compile time:     Sep 11 2026 15:22:36[0m
+[0;32mI (818) app_init: ELF file SHA256:  146477093...[0m
+[0;32mI (824) app_init: ESP-IDF:          v5.3.1[0m
+[0;32mI (829) efuse_init: Min chip rev:     v0.0[0m
+[0;32mI (833) efuse_init: Max chip rev:     v0.99 [0m
+[0;32mI (838) efuse_init: Chip rev:         v0.2[0m
+[0;32mI (843) heap_init: Initializing. RAM available for dynamic allocation:[0m
+[0;32mI (850) heap_init: At 3FCAA8B8 len 0003EE58 (251 KiB): RAM[0m
+[0;32mI (856) heap_init: At 3FCE9710 len 00005724 (21 KiB): RAM[0m
+[0;32mI (863) heap_init: At 3FCF0000 len 00008000 (32 KiB): DRAM[0m
+[0;32mI (869) heap_init: At 600FE100 len 00001EE8 (7 KiB): RTCRAM[0m
+[0;32mI (875) esp_psram: Adding pool of 8192K of PSRAM memory to heap allocator[0m
+[0;32mI (883) spi_flash: detected chip: boya[0m
+[0;32mI (887) spi_flash: flash io: dio[0m
+[0;32mI (891) sleep: Configure to isolate all GPIO pins in sleep state[0m
+[0;32mI (898) sleep: Enable automatic switching of GPIO sleep configuration[0m
+[0;32mI (905) main_task: Started on CPU0[0m
+[0;32mI (935) esp_psram: Reserving pool of 32K of internal memory for DMA/internal allocations[0m
+[0;32mI (935) main_task: Calling app_main()[0m
+[0;32mI (955) temperature_sensor: Range [-10°C ~ 80°C], error < 1°C[0m
+[0;32mI (955) dragonbench: {"schema":1,"event":"boot","seq":1,"uptime_ms":81,"target":"esp32s3-n8r8","firmware_version":"0.1.0"}[0m
+[0;32mI (965) dragonbench: {"schema":1,"event":"reset_reason","seq":2,"uptime_ms":86,"target":"esp32s3-n8r8","firmware_version":"0.1.0","metrics":{"reason":"power_on"}}[0m
+[0;32mI (975) pp: pp rom version: e7ae62f[0m
+[0;32mI (985) net80211: net80211 rom version: e7ae62f[0m
+I (995) wifi:wifi driver task: 3fcbc62c, prio:23, stack:6656, core=0
+I (1005) wifi:wifi firmware version: ccaebfa
+I (1005) wifi:wifi certification version: v7.0
+I (1005) wifi:config NVS flash: enabled
+I (1005) wifi:config nano formating: disabled
+I (1005) wifi:Init data frame dynamic rx buffer num: 32
+I (1015) wifi:Init static rx mgmt buffer num: 5
+I (1015) wifi:Init management short buffer num: 32
+I (1025) wifi:Init static tx buffer num: 16
+I (1025) wifi:Init tx cache buffer num: 32
+I (1025) wifi:Init static tx FG buffer num: 2
+I (1035) wifi:Init static rx buffer size: 1600
+I (1035) wifi:Init static rx buffer num: 10
+I (1045) wifi:Init dynamic rx buffer num: 32
+[0;32mI (1045) wifi_init: rx ba win: 6[0m
+[0;32mI (1045) wifi_init: accept mbox: 6[0m
+[0;32mI (1055) wifi_init: tcpip mbox: 32[0m
+[0;32mI (1055) wifi_init: udp mbox: 6[0m
+[0;32mI (1065) wifi_init: tcp mbox: 6[0m
+[0;32mI (1065) wifi_init: tcp tx win: 5760[0m
+[0;32mI (1065) wifi_init: tcp rx win: 5760[0m
+[0;32mI (1075) wifi_init: tcp mss: 1440[0m
+[0;32mI (1075) wifi_init: WiFi IRAM OP enabled[0m
+[0;32mI (1085) wifi_init: WiFi RX IRAM OP enabled[0m
+[0;32mI (1085) phy_init: phy_version 680,a6008b2,Jun  4 2024,16:41:10[0m
+[0;33mW (1125) phy_init: saving new calibration data because of checksum failure, mode(0)[0m
