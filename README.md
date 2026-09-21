@@ -79,3 +79,7 @@ explicitly; it is never silently skipped.
 
 If DragonBench is useful to you, you can [support development on
 Ko-fi](https://ko-fi.com/opinion_panda).
+
+## License
+
+DragonBench is available under the [MIT License](LICENSE), matching DragonBreath and the wider Dragon-family tooling.
