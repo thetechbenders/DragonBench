@@ -43,7 +43,9 @@ paths:
       description: >-
         Responds before the radio reconnects; the direct access point may drop
         briefly while it moves to the network's channel. Poll /api/v1/status
-        network.sta_state for the result. The password is never returned.
+        network.sta_state for the result. Submissions are applied one at a
+        time; a newer pending submission replaces an older one. The password is
+        never returned.
       requestBody:
         required: true
         content:

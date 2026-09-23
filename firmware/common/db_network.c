@@ -17,6 +17,14 @@ bool db_network_identity(const uint8_t mac[6], char *suffix, size_t suffix_size,
 
 bool db_sta_is_configured(const char *ssid) { return ssid && ssid[0] != '\0'; }
 
+uint32_t db_sta_retry_delay_ms(unsigned attempt) {
+    if (attempt < DB_STA_FAST_RETRIES) return 0;
+    unsigned step = attempt - DB_STA_FAST_RETRIES;
+    uint32_t delay = DB_STA_BACKOFF_MIN_MS;
+    while (step-- > 0 && delay < DB_STA_BACKOFF_MAX_MS) delay *= 2U;
+    return delay < DB_STA_BACKOFF_MAX_MS ? delay : DB_STA_BACKOFF_MAX_MS;
+}
+
 const char *db_ap_state_name(db_ap_state_t state) {
     static const char *const names[] = {"starting", "active", "failed"};
     return state <= DB_AP_FAILED ? names[state] : "unknown";

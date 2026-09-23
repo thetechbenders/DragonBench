@@ -2,6 +2,7 @@
 #include "db_network.h"
 
 #include <assert.h>
+#include <limits.h>
 #include <string.h>
 
 int main(void) {
@@ -22,6 +23,10 @@ int main(void) {
     assert(strcmp(db_ap_state_name(DB_AP_ACTIVE), "active") == 0);
     assert(strcmp(db_ap_state_name(DB_AP_FAILED), "failed") == 0);
     assert(strcmp(db_sta_state_name(DB_STA_UNCONFIGURED), "unconfigured") == 0);
+    static const uint32_t expected_delays[] = {0, 0, 0, 5000, 10000, 20000, 40000, 60000, 60000};
+    for (unsigned i = 0; i < sizeof(expected_delays) / sizeof(expected_delays[0]); ++i)
+        assert(db_sta_retry_delay_ms(i) == expected_delays[i]);
+    assert(db_sta_retry_delay_ms(UINT_MAX) == DB_STA_BACKOFF_MAX_MS);
 
     db_workload_t workload = DB_WORKLOAD_COUNT;
     assert(db_workload_parse("CPU_STRESS", &workload));

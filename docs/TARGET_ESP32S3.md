@@ -38,7 +38,10 @@ DragonBench creates a Wi-Fi access-point netif and a station netif, and no
 Ethernet netif. The access point always runs; the station joins a network only
 when one is configured through Kconfig or the `/setup` page. Accordingly,
 `sdkconfig.defaults` enables both predefined mDNS interfaces within its
-two-entry capacity. This profile is the default; the TinyS3[D] is described in
+two-entry capacity. A lost station connection is retried three times
+immediately, then with backoff doubling from 5 s to a 60 s ceiling,
+indefinitely; each attempt scans channels and can briefly interrupt
+access-point clients. This profile is the default; the TinyS3[D] is described in
 [its own profile](TARGET_TINYS3D.md). Generated `sdkconfig` and
 `managed_components/` remain local; the Component Manager lockfile is tracked
 to preserve the dependency graph used by the validated build.

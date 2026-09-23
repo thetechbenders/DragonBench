@@ -185,6 +185,28 @@ class ContractTests(unittest.TestCase):
         source = (ROOT / "firmware/targets/esp32s3/main/main.c").read_text()
         self.assertIn('"network_connected", sta_state == DB_STA_CONNECTED', source)
 
+    @staticmethod
+    def _function_body(source, signature):
+        start = source.index(signature)
+        return source[start:source.index("\n}\n", start)]
+
+    def test_provisioning_is_serialized_through_one_worker(self):
+        source = (ROOT / "firmware/targets/esp32s3/main/main.c").read_text()
+        handler = self._function_body(source, "static esp_err_t network_sta_post")
+        self.assertIn("xQueueOverwrite(sta_config_queue", handler)
+        for radio_call in ("configure_sta(", "esp_wifi_set_config", "esp_wifi_connect", "esp_wifi_disconnect"):
+            self.assertNotIn(radio_call, handler)
+        worker = self._function_body(source, "static void sta_config_task")
+        self.assertLess(worker.index("esp_wifi_disconnect()"), worker.index("configure_sta("))
+        self.assertLess(worker.index("configure_sta("), worker.index("nvs_save_sta("))
+
+    def test_station_reconnect_backs_off_instead_of_giving_up(self):
+        source = (ROOT / "firmware/targets/esp32s3/main/main.c").read_text()
+        handler = self._function_body(source, "static void wifi_event")
+        disconnected = handler[handler.index("WIFI_EVENT_STA_DISCONNECTED"):handler.index("IP_EVENT_STA_GOT_IP")]
+        self.assertIn("sta_schedule_retry();", disconnected)
+        self.assertIn("db_sta_retry_delay_ms(", self._function_body(source, "static void sta_schedule_retry"))
+
     def test_station_password_is_never_serialized(self):
         source = (ROOT / "firmware/targets/esp32s3/main/main.c").read_text()
         self.assertIsNone(re.search(r'cJSON_Add\w*ToObject\([^;]*"password"', source))

@@ -25,6 +25,7 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "mdns.h"
@@ -59,7 +60,6 @@ static bool mdns_ready;
 static EventGroupHandle_t network_events;
 #define AP_STARTED_BIT BIT0
 #define AP_START_TIMEOUT_MS 5000
-#define STA_RETRY_LIMIT 3
 static temperature_sensor_handle_t temp_sensor;
 static bool temp_available;
 static char reset_reason_text[32];
@@ -856,12 +856,60 @@ static bool configure_sta(const char *ssid, const char *password) {
     return true;
 }
 
-static void sta_connect_task(void *unused) {
+typedef struct { char ssid[33]; char password[65]; } sta_credentials_t;
+static QueueHandle_t sta_config_queue;
+static esp_timer_handle_t sta_retry_timer;
+static volatile bool sta_reconfiguring;
+
+static void sta_retry_fire(void *unused) {
     (void)unused;
-    vTaskDelay(pdMS_TO_TICKS(300));
-    esp_wifi_disconnect();
+    if (sta_reconfiguring || !sta_configured) return;
+    sta_state = DB_STA_CONNECTING;
     esp_wifi_connect();
-    vTaskDelete(NULL);
+}
+
+static void sta_schedule_retry(void) {
+    uint32_t delay_ms = db_sta_retry_delay_ms(sta_retry_count++);
+    if (delay_ms == 0) {
+        sta_state = DB_STA_CONNECTING;
+        esp_wifi_connect();
+        return;
+    }
+    ESP_LOGI(TAG, "sta_retry_in_ms=%" PRIu32, delay_ms);
+    esp_timer_stop(sta_retry_timer);
+    esp_timer_start_once(sta_retry_timer, (uint64_t)delay_ms * 1000U);
+}
+
+static void sta_config_task(void *unused) {
+    (void)unused;
+    sta_credentials_t creds;
+    for (;;) {
+        if (xQueueReceive(sta_config_queue, &creds, portMAX_DELAY) != pdTRUE) continue;
+        // Let the HTTP response leave over the AP before the radio may change channel.
+        vTaskDelay(pdMS_TO_TICKS(300));
+        sta_reconfiguring = true;
+        esp_timer_stop(sta_retry_timer);
+        esp_wifi_disconnect();
+        vTaskDelay(pdMS_TO_TICKS(100));
+        bool applied = false;
+        for (int attempt = 0; attempt < 20 && !applied; ++attempt) {
+            applied = configure_sta(creds.ssid, creds.password);
+            if (!applied) vTaskDelay(pdMS_TO_TICKS(100));
+        }
+        if (applied) {
+            if (!nvs_save_sta(creds.ssid, creds.password))
+                ESP_LOGW(TAG, "station credentials applied but not persisted to NVS");
+            sta_configured = true;
+            ESP_LOGI(TAG, "sta_connect ssid=%s", creds.ssid);
+        } else {
+            ESP_LOGE(TAG, "station credentials could not be applied; keeping the previous network");
+        }
+        memset(&creds, 0, sizeof(creds));
+        sta_retry_count = 0;
+        sta_reconfiguring = false;
+        if (sta_configured) sta_schedule_retry();
+        else sta_state = DB_STA_UNCONFIGURED;
+    }
 }
 
 static esp_err_t network_sta_post(httpd_req_t *req) {
@@ -877,27 +925,16 @@ static esp_err_t network_sta_post(httpd_req_t *req) {
         cJSON_AddStringToObject(o, "error", "ssid required (<32 chars); password must be empty or 8-63 chars");
         return send_json(req, o, 400);
     }
-    bool ok = configure_sta(ssid->valuestring, password_value);
-    if (ok) {
-        sta_configured = true;
-        sta_retry_count = 0;
-        sta_state = DB_STA_CONNECTING;
-        if (!nvs_save_sta(ssid->valuestring, password_value))
-            ESP_LOGW(TAG, "station credentials applied but not persisted to NVS");
-    }
-    cJSON *o = cJSON_CreateObject();
-    if (!ok) {
-        cJSON_Delete(body);
-        cJSON_AddStringToObject(o, "error", "failed to apply wifi config");
-        return send_json(req, o, 400);
-    }
-    cJSON_AddStringToObject(o, "state", "connecting");
-    cJSON_AddStringToObject(o, "ssid", ssid->valuestring);
+    sta_credentials_t creds = {0};
+    snprintf(creds.ssid, sizeof(creds.ssid), "%s", ssid->valuestring);
+    snprintf(creds.password, sizeof(creds.password), "%s", password_value);
     cJSON_Delete(body);
-    esp_err_t send_result = send_json(req, o, 200);
-    if (xTaskCreate(sta_connect_task, "db_sta_connect", 3072, NULL, 5, NULL) != pdPASS)
-        ESP_LOGE(TAG, "station connect task creation failed");
-    return send_result;
+    xQueueOverwrite(sta_config_queue, &creds);
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "state", "connecting");
+    cJSON_AddStringToObject(o, "ssid", creds.ssid);
+    memset(&creds, 0, sizeof(creds));
+    return send_json(req, o, 200);
 }
 
 static void start_http(void) {
@@ -943,15 +980,13 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
         ESP_LOGW(TAG, "sta_disconnected ssid=%.*s reason=%u rssi=%d retry=%u", event->ssid_len,
                  (const char *)event->ssid, event->reason, event->rssi, sta_retry_count);
         sta_state = DB_STA_DISCONNECTED;
-        if (event->reason == WIFI_REASON_ASSOC_LEAVE) return;
-        if (sta_configured && sta_retry_count++ < STA_RETRY_LIMIT) {
-            sta_state = DB_STA_CONNECTING;
-            esp_wifi_connect();
-        }
+        if (event->reason == WIFI_REASON_ASSOC_LEAVE || sta_reconfiguring || !sta_configured) return;
+        sta_schedule_retry();
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = data;
         snprintf(sta_ip, sizeof(sta_ip), IPSTR, IP2STR(&event->ip_info.ip));
         sta_state = DB_STA_CONNECTED;
+        esp_timer_stop(sta_retry_timer);
         sta_retry_count = 0;
         wifi_ap_record_t record;
         if (esp_wifi_sta_get_ap_info(&record) == ESP_OK) wifi_rssi = record.rssi;
@@ -973,8 +1008,12 @@ static bool start_wifi(void) {
     sta_configured = db_sta_is_configured(sta_ssid_buf);
     sta_state = sta_configured ? DB_STA_CONNECTING : DB_STA_UNCONFIGURED;
     network_events = xEventGroupCreate();
-    if (!network_events || esp_netif_init() != ESP_OK ||
-        esp_event_loop_create_default() != ESP_OK) return false;
+    sta_config_queue = xQueueCreate(1, sizeof(sta_credentials_t));
+    const esp_timer_create_args_t retry_timer_args = {.callback = sta_retry_fire, .name = "db_sta_retry"};
+    if (!network_events || !sta_config_queue ||
+        esp_timer_create(&retry_timer_args, &sta_retry_timer) != ESP_OK ||
+        xTaskCreate(sta_config_task, "db_sta_config", 4096, NULL, 5, NULL) != pdPASS ||
+        esp_netif_init() != ESP_OK || esp_event_loop_create_default() != ESP_OK) return false;
     ap_netif = esp_netif_create_default_wifi_ap();
     if (!ap_netif) return false;
     if (!esp_netif_create_default_wifi_sta()) return false;
