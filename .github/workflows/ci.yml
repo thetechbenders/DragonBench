@@ -41,7 +41,11 @@ jobs:
       - name: Install tooling dependencies
         run: pip install -r tools/requirements.txt
       - name: Run tests
-        run: python -m unittest discover -s tests -v
+        env:
+          DRAGONBENCH_REQUIRE_NODE: "1"
+        run: |
+          node --version
+          python -m unittest discover -s tests -v
       - name: Run reset characterization tooling tests
         run: python -m unittest tools.tests.test_parsing -v
       - name: Compile Python sources

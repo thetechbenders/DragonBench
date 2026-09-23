@@ -50,6 +50,8 @@ static int wifi_rssi;
 static unsigned ap_client_count;
 static unsigned sta_retry_count;
 static unsigned sta_last_reason;
+static volatile uint32_t sta_config_request_id;
+static const char *volatile sta_config_result = "none";
 static esp_netif_t *ap_netif;
 static char device_id[DB_DEVICE_ID_LEN];
 static char ap_ssid[DB_AP_SSID_LEN];
@@ -367,6 +369,8 @@ static esp_err_t status_get(httpd_req_t *req) {
     cJSON_AddStringToObject(network, "sta_state", db_sta_state_name(sta_state));
     cJSON_AddStringToObject(network, "sta_ssid", sta_ssid);
     cJSON_AddNumberToObject(network, "sta_last_disconnect_reason", sta_last_reason);
+    cJSON_AddNumberToObject(network, "sta_config_request_id", sta_config_request_id);
+    cJSON_AddStringToObject(network, "sta_config_result", sta_config_result);
     cJSON_AddBoolToObject(network, "sta_configured", sta_configured);
     cJSON_AddBoolToObject(network, "sta_connected", sta_state == DB_STA_CONNECTED);
     if (sta_state == DB_STA_CONNECTED) cJSON_AddStringToObject(network, "sta_ip", sta_ip);
@@ -820,20 +824,21 @@ static const char setup_page[] =
 "      body:JSON.stringify({ssid:ssid,password:role('sta-password').value})})"
 "    .then(function(res){return res.json().then(function(data){return {ok:res.ok,data:data}})})"
 "    .then(function(r){"
-"      if(r.ok){pending=r.data.ssid;message.textContent='Connecting to '+pending+'…'}"
+"      if(r.ok){pending={id:r.data.request_id,ssid:r.data.ssid};message.textContent='Connecting to '+pending.ssid+'…'}"
 "      else{pending=null;message.textContent='Rejected: '+(r.data.error||'unknown error')}"
 "    })"
-"    .catch(function(){pending=ssid;message.textContent='No response yet. The request may still apply; this page keeps checking.'});"
+"    .catch(function(){pending=null;message.textContent='No response to the request. If the access point dropped, reconnect to it and check the status below.'});"
 "  });"
 "  function render(n){"
 "    var connected=n.sta_state==='connected';"
 "    show('sta-state',n.sta_state);show('sta-current',n.sta_ssid);show('sta-ip',connected?n.sta_ip:undefined);"
 "    role('sta-reason').textContent=connected?'—':reason(n.sta_last_disconnect_reason);"
-"    if(pending&&n.sta_ssid===pending){"
-"      if(connected){message.textContent='Connected to '+pending+' at '+n.sta_ip+'.';pending=null}"
-"      else if(n.sta_last_disconnect_reason&&n.sta_last_disconnect_reason!==8)"
-"        message.textContent='Not connected to '+pending+' yet: '+reason(n.sta_last_disconnect_reason)+'. Retrying.';"
-"    }"
+"    if(!pending||!(n.sta_config_request_id>=pending.id))return;"
+"    if(n.sta_config_request_id>pending.id){message.textContent='A newer submission replaced this one.';pending=null}"
+"    else if(n.sta_config_result==='failed'){message.textContent='Could not apply these settings; the previous network is still in use.';pending=null}"
+"    else if(connected&&n.sta_ssid===pending.ssid){message.textContent='Connected to '+pending.ssid+' at '+n.sta_ip+'.';pending=null}"
+"    else if(n.sta_last_disconnect_reason&&n.sta_last_disconnect_reason!==8)"
+"      message.textContent='Not connected to '+pending.ssid+' yet: '+reason(n.sta_last_disconnect_reason)+'. Retrying.';"
 "  }"
 "  function poll(){"
 "    if(inFlight)return;"
@@ -894,7 +899,7 @@ static bool configure_sta(const char *ssid, const char *password) {
     return true;
 }
 
-typedef struct { char ssid[33]; char password[65]; } sta_credentials_t;
+typedef struct { uint32_t request_id; char ssid[33]; char password[65]; } sta_credentials_t;
 static QueueHandle_t sta_config_queue;
 static esp_timer_handle_t sta_retry_timer;
 static volatile bool sta_reconfiguring;
@@ -942,11 +947,15 @@ static void sta_config_task(void *unused) {
         } else {
             ESP_LOGE(TAG, "station credentials could not be applied; keeping the previous network");
         }
-        memset(&creds, 0, sizeof(creds));
         sta_retry_count = 0;
+        sta_state = sta_configured ? DB_STA_CONNECTING : DB_STA_UNCONFIGURED;
+        // Publish the outcome only once the old connection can no longer read as current.
+        sta_last_reason = 0;
+        sta_config_result = applied ? "applied" : "failed";
+        sta_config_request_id = creds.request_id;
+        memset(&creds, 0, sizeof(creds));
         sta_reconfiguring = false;
         if (sta_configured) sta_schedule_retry();
-        else sta_state = DB_STA_UNCONFIGURED;
     }
 }
 
@@ -963,13 +972,15 @@ static esp_err_t network_sta_post(httpd_req_t *req) {
         cJSON_AddStringToObject(o, "error", "ssid required (<32 chars); password must be empty or 8-63 chars");
         return send_json(req, o, 400);
     }
-    sta_credentials_t creds = {0};
+    static uint32_t request_counter;
+    sta_credentials_t creds = {.request_id = ++request_counter};
     snprintf(creds.ssid, sizeof(creds.ssid), "%s", ssid->valuestring);
     snprintf(creds.password, sizeof(creds.password), "%s", password_value);
     cJSON_Delete(body);
     xQueueOverwrite(sta_config_queue, &creds);
     cJSON *o = cJSON_CreateObject();
     cJSON_AddStringToObject(o, "state", "connecting");
+    cJSON_AddNumberToObject(o, "request_id", creds.request_id);
     cJSON_AddStringToObject(o, "ssid", creds.ssid);
     memset(&creds, 0, sizeof(creds));
     return send_json(req, o, 200);
