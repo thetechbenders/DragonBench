@@ -17,6 +17,16 @@ bool db_network_identity(const uint8_t mac[6], char *suffix, size_t suffix_size,
 
 bool db_sta_is_configured(const char *ssid) { return ssid && ssid[0] != '\0'; }
 
+bool db_mdns_hostname(const char *configured, const char *device_id, char *out, size_t out_size) {
+    const char *source = (configured && configured[0]) ? configured : device_id;
+    if (!source || !source[0] || !out || out_size == 0) return false;
+    size_t i = 0;
+    for (; source[i] && i + 1 < out_size; ++i)
+        out[i] = (source[i] >= 'A' && source[i] <= 'Z') ? (char)(source[i] - 'A' + 'a') : source[i];
+    out[i] = '\0';
+    return source[i] == '\0';
+}
+
 uint32_t db_sta_retry_delay_ms(unsigned attempt) {
     if (attempt < DB_STA_FAST_RETRIES) return 0;
     unsigned step = attempt - DB_STA_FAST_RETRIES;

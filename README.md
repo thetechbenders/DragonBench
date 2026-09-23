@@ -53,16 +53,25 @@ MAC), at `http://192.168.4.1/`; its password is `DragonBench -> Direct
 access-point password`. To also join a 2.4 GHz network, open
 `http://192.168.4.1/setup` or set `DragonBench -> Optional station Wi-Fi SSID`
 and password in a local, ignored `sdkconfig`. Credentials entered on the setup
-page persist in NVS and take precedence over Kconfig. The device advertises
-`dragonbench.local` over mDNS on both interfaces and serves the UI at
-`http://dragonbench.local/`.
+page persist in NVS and take precedence over Kconfig.
 
-Host CLI, with Python 3.10+ and no third-party dependencies:
+Each board advertises its own mDNS name on both interfaces, derived from the
+same MAC suffix as its access point: `DragonBench-D685F0` answers as
+`http://dragonbench-d685f0.local/`. Several boards can share one network
+without a client silently reaching the wrong one. `DragonBench -> mDNS
+hostname` overrides the name; a generated `sdkconfig` from before this change
+keeps the old shared `dragonbench` name until that value is cleared.
+`/api/v1/status` reports the name mDNS actually holds as
+`network.mdns_hostname`.
+
+Host CLI, with Python 3.10+ and no third-party dependencies. `--host` defaults
+to `192.168.4.1`, the access point of whichever board you are joined to; on a
+shared network, name the board:
 
 ```text
-python -m cli.dragonbench --host dragonbench.local status
-python -m cli.dragonbench --host dragonbench.local run CPU_STRESS --duration 60
-python -m cli.dragonbench --json --host dragonbench.local events
+python -m cli.dragonbench --host dragonbench-d685f0.local status
+python -m cli.dragonbench --host dragonbench-d685f0.local run CPU_STRESS --duration 60
+python -m cli.dragonbench --json --host dragonbench-d685f0.local events
 ```
 
 Network workloads use an explicit external TCP peer. Start one of these before

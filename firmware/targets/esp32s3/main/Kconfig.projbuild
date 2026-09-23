@@ -9,8 +9,11 @@ config DB_AP_PASSWORD
     string "Direct access-point password"
     default "Dragon$ru1e"
 config DB_HOSTNAME
-    string "mDNS hostname"
-    default "dragonbench"
+    string "mDNS hostname (empty: per-board dragonbench-xxxxxx)"
+    default ""
+    help
+        Empty derives a unique name from the MAC suffix, matching the access
+        point name, so several boards on one network never share a name.
 config DB_FIRMWARE_VERSION
     string "Firmware version"
     default "0.1.0"

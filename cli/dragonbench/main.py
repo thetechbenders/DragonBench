@@ -43,7 +43,7 @@ class Client:
 
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="dragonbench")
-    p.add_argument("--host", default="dragonbench.local")
+    p.add_argument("--host", default="192.168.4.1")
     p.add_argument("--json", action="store_true", dest="machine")
     p.add_argument("--timeout", type=float, default=10.0)
     sub = p.add_subparsers(dest="command", required=True)

@@ -57,6 +57,7 @@ static char sta_ssid[33];
 static char ap_ip[16];
 static char sta_ip[16];
 static bool mdns_ready;
+static char mdns_hostname[MDNS_NAME_BUF_LEN];
 static EventGroupHandle_t network_events;
 #define AP_STARTED_BIT BIT0
 #define AP_START_TIMEOUT_MS 5000
@@ -369,7 +370,10 @@ static esp_err_t status_get(httpd_req_t *req) {
     cJSON_AddBoolToObject(network, "sta_configured", sta_configured);
     cJSON_AddBoolToObject(network, "sta_connected", sta_state == DB_STA_CONNECTED);
     if (sta_state == DB_STA_CONNECTED) cJSON_AddStringToObject(network, "sta_ip", sta_ip);
-    cJSON_AddStringToObject(network, "mdns_hostname", CONFIG_DB_HOSTNAME);
+    char live_hostname[MDNS_NAME_BUF_LEN];
+    if (!mdns_ready || mdns_hostname_get(live_hostname) != ESP_OK)
+        snprintf(live_hostname, sizeof(live_hostname), "%s", mdns_hostname);
+    cJSON_AddStringToObject(network, "mdns_hostname", live_hostname);
     cJSON_AddBoolToObject(network, "mdns_ready", mdns_ready);
     cJSON_AddBoolToObject(o, "network_connected", sta_state == DB_STA_CONNECTED);
     return send_json(req, o, 200);
@@ -1130,11 +1134,14 @@ void app_main(void) {
     ESP_LOGI(TAG, "ssid=%s", ap_ssid);
     ESP_LOGI(TAG, "ap_ip=%s", ap_ip);
     esp_err_t mdns_result = mdns_init();
-    if (mdns_result == ESP_OK) mdns_result = mdns_hostname_set(CONFIG_DB_HOSTNAME);
+    if (mdns_result == ESP_OK &&
+        !db_mdns_hostname(CONFIG_DB_HOSTNAME, device_id, mdns_hostname, sizeof(mdns_hostname)))
+        mdns_result = ESP_ERR_INVALID_ARG;
+    if (mdns_result == ESP_OK) mdns_result = mdns_hostname_set(mdns_hostname);
     if (mdns_result == ESP_OK) mdns_result = mdns_instance_name_set("DragonBench characterization harness");
     if (mdns_result == ESP_OK) mdns_result = mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
     mdns_ready = mdns_result == ESP_OK;
-    if (mdns_ready) ESP_LOGI(TAG, "mdns=%s.local", CONFIG_DB_HOSTNAME);
+    if (mdns_ready) ESP_LOGI(TAG, "mdns=%s.local", mdns_hostname);
     else ESP_LOGW(TAG, "mDNS unavailable (%s); use AP IP", esp_err_to_name(mdns_result));
     start_http();
     emit_event("ready", NULL, prior_run, NULL, NULL, NULL);

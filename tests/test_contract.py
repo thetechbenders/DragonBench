@@ -207,6 +207,16 @@ class ContractTests(unittest.TestCase):
         self.assertIn("sta_schedule_retry();", disconnected)
         self.assertIn("db_sta_retry_delay_ms(", self._function_body(source, "static void sta_schedule_retry"))
 
+    def test_mdns_hostname_is_per_board_and_reported_live(self):
+        source = (ROOT / "firmware/targets/esp32s3/main/main.c").read_text()
+        kconfig = (ROOT / "firmware/targets/esp32s3/main/Kconfig.projbuild").read_text()
+        self.assertIsNotNone(re.search(r'config DB_HOSTNAME\n(?:.*\n)*?\s+default ""', kconfig))
+        self.assertIn("db_mdns_hostname(CONFIG_DB_HOSTNAME, device_id", source)
+        self.assertNotIn("mdns_hostname_set(CONFIG_DB_HOSTNAME)", source)
+        self.assertIn("mdns_hostname_get(live_hostname)", self._function_body(source, "static esp_err_t status_get"))
+        for tool in ("cli/dragonbench/main.py", "tools/phase2_monitor.py", "tools/reset_characterization.py"):
+            self.assertNotIn('default="dragonbench.local"', (ROOT / tool).read_text(), tool)
+
     def test_html_pages_are_never_cached(self):
         source = (ROOT / "firmware/targets/esp32s3/main/main.c").read_text()
         self.assertIn('httpd_resp_set_hdr(req, "Cache-Control", "no-store")', self._function_body(source, "static esp_err_t send_page"))

@@ -139,7 +139,7 @@ def _reacquire(vid_pid: str, events_file: str) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--port", required=True)
-    ap.add_argument("--host", default="dragonbench.local")
+    ap.add_argument("--host", default="192.168.4.1")
     ap.add_argument("--raw-log", required=True)
     ap.add_argument("--events-file", required=True)
     ap.add_argument("--http-log", required=True)

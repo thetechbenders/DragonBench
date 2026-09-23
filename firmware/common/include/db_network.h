@@ -21,6 +21,9 @@ bool db_network_identity(const uint8_t mac[6], char *suffix, size_t suffix_size,
                          char *ssid, size_t ssid_size);
 bool db_sta_is_configured(const char *ssid);
 
+/* The configured hostname if set, otherwise the lowercased device id. */
+bool db_mdns_hostname(const char *configured, const char *device_id, char *out, size_t out_size);
+
 #define DB_STA_FAST_RETRIES 3U
 #define DB_STA_BACKOFF_MIN_MS 5000U
 #define DB_STA_BACKOFF_MAX_MS 60000U
