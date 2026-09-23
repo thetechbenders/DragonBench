@@ -207,6 +207,11 @@ class ContractTests(unittest.TestCase):
         self.assertIn("sta_schedule_retry();", disconnected)
         self.assertIn("db_sta_retry_delay_ms(", self._function_body(source, "static void sta_schedule_retry"))
 
+    def test_html_pages_are_never_cached(self):
+        source = (ROOT / "firmware/targets/esp32s3/main/main.c").read_text()
+        self.assertIn('httpd_resp_set_hdr(req, "Cache-Control", "no-store")', self._function_body(source, "static esp_err_t send_page"))
+        self.assertEqual(source.count('httpd_resp_set_type(req, "text/html")'), 1)
+
     def test_station_password_is_never_serialized(self):
         source = (ROOT / "firmware/targets/esp32s3/main/main.c").read_text()
         self.assertIsNone(re.search(r'cJSON_Add\w*ToObject\([^;]*"password"', source))

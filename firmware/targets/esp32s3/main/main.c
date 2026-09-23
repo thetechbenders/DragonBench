@@ -743,7 +743,14 @@ static const char landing[] =
 "</body>"
 "</html>";
 
-static esp_err_t landing_get(httpd_req_t *req) { httpd_resp_set_type(req, "text/html"); return httpd_resp_send(req, landing, HTTPD_RESP_USE_STRLEN); }
+static esp_err_t send_page(httpd_req_t *req, const char *html) {
+    httpd_resp_set_type(req, "text/html");
+    // Pages change with every flash; a cached copy would show a previous build's UI.
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    return httpd_resp_send(req, html, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t landing_get(httpd_req_t *req) { return send_page(req, landing); }
 
 static const char setup_page[] =
 "<!doctype html>"
@@ -845,7 +852,7 @@ static const char setup_page[] =
 "</body>"
 "</html>";
 
-static esp_err_t setup_get(httpd_req_t *req) { httpd_resp_set_type(req, "text/html"); return httpd_resp_send(req, setup_page, HTTPD_RESP_USE_STRLEN); }
+static esp_err_t setup_get(httpd_req_t *req) { return send_page(req, setup_page); }
 
 #define WIFI_NVS_NAMESPACE "db_wifi"
 
