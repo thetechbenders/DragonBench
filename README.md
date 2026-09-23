@@ -10,10 +10,12 @@ It is not JumpJet or DragonBreath firmware, a performance benchmark, a generic
 HAL, a device-control application, or an authority for product safety limits.
 The firmware contains no heater or fan GPIOs and exposes no actuator API.
 
-Version 0.1.0 targets ESP32-S3 N8R8 module hardware: 8 MB embedded flash and
-8 MB embedded Octal SPI PSRAM. Browser and CLI clients use the same versioned
-HTTP/JSON API. DUT events identify workload boundaries; all voltage/current
-evidence remains owned by external instruments.
+Version 0.1.0 builds for two ESP32-S3 board profiles, both with 8 MB flash and
+8 MB PSRAM: the N8R8 module (Octal SPI PSRAM, CH343P USB-UART bridge; the
+default) and the Unexpected Maker TinyS3[D] (Quad SPI PSRAM, native USB
+Serial/JTAG, onboard/U.FL RF switch). Browser and CLI clients use the same
+versioned HTTP/JSON API. DUT events identify workload boundaries; all
+voltage/current evidence remains owned by external instruments.
 
 ## Quick start
 
@@ -21,18 +23,39 @@ The ESP32-S3 target is validated with ESP-IDF 5.3.5 and xtensa-esp-elf GCC
 13.2.0. That is the current validated component floor, not evidence that older
 ESP-IDF releases are incompatible; the minimum supported version has not yet
 been established. The external `espressif/mdns` component is pinned to the
-validated 1.12.0 release. Configure Wi-Fi without committing credentials:
+validated 1.12.0 release.
+
+The default profile is the N8R8 module:
 
 ```text
 idf.py set-target esp32s3
-idf.py menuconfig
 idf.py build
 idf.py -p COMx flash monitor
 ```
 
-Set `DragonBench -> Wi-Fi SSID` and `Wi-Fi password`, or supply the corresponding
-Kconfig values in a local, ignored `sdkconfig`. The device advertises
-`dragonbench.local` over mDNS and serves the UI at `http://dragonbench.local/`.
+For the TinyS3[D], layer its overlay on the shared defaults. The PSRAM line
+mode differs between the boards, and the wrong one aborts at boot with
+`octal_psram: PSRAM chip is not connected, or wrong PSRAM line mode`:
+
+```text
+idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.tinys3d" set-target esp32s3
+idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.tinys3d" build
+```
+
+Delete a generated `sdkconfig` before switching profiles; existing values take
+precedence over the defaults files. The TinyS3[D] has no auto-reset circuit on
+its native USB port: hold BOOT, tap RESET, release BOOT, then flash with
+`python -m esptool --chip esp32s3 -p COMx --before no_reset write_flash "@flash_args"`
+from the `build` directory, and unplug/replug USB to boot the new image.
+
+Every board brings up its own WPA2 access point, `DragonBench-XXXXXX` (from the
+MAC), at `http://192.168.4.1/`; its password is `DragonBench -> Direct
+access-point password`. To also join a 2.4 GHz network, open
+`http://192.168.4.1/setup` or set `DragonBench -> Optional station Wi-Fi SSID`
+and password in a local, ignored `sdkconfig`. Credentials entered on the setup
+page persist in NVS and take precedence over Kconfig. The device advertises
+`dragonbench.local` over mDNS on both interfaces and serves the UI at
+`http://dragonbench.local/`.
 
 Host CLI, with Python 3.10+ and no third-party dependencies:
 
@@ -68,6 +91,14 @@ Wi-Fi/mDNS, workload execution, and electrical current or rail
 characterization remain unvalidated. A successful build, flash, or boot does
 not establish module current demand, rail limits, brownout margin, or product
 safety thresholds; those remain external bench evidence.
+
+On the TinyS3[D], flash, boot, the 8 MB Quad SPI PSRAM test, the direct access
+point, station association and DHCP on a home network, station credentials
+saved through `/api/v1/network/sta` persisting in NVS across reflashes, and
+mDNS on both interfaces have been validated. The `/setup` page itself has not
+yet been exercised on hardware, and workload execution and electrical
+characterization remain unvalidated there too. See
+[TinyS3[D] profile](docs/TARGET_TINYS3D.md).
 
 ## Scope rule
 

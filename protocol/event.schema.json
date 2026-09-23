@@ -13,7 +13,7 @@
     "result": {"enum": ["pass", "fail", "aborted", "unsupported"]},
     "parameters": {"type": "object"},
     "metrics": {"type": "object"},
-    "target": {"const": "esp32s3-n8r8"},
+    "target": {"enum": ["esp32s3-n8r8", "esp32s3-tinys3d"]},
     "firmware_version": {"type": "string"}
   },
   "additionalProperties": true

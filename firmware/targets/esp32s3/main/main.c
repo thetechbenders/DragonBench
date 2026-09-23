@@ -1,18 +1,22 @@
 #include <inttypes.h>
 #include <netdb.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 #include "cJSON.h"
+#include "db_network.h"
 #include "db_run.h"
+#include "driver/gpio.h"
 #include "driver/temperature_sensor.h"
 #include "esp_attr.h"
 #include "esp_event.h"
 #include "esp_http_server.h"
 #include "esp_netif.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
 #include "esp_random.h"
@@ -20,6 +24,7 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "mdns.h"
@@ -37,8 +42,24 @@ static size_t event_head;
 static size_t event_count;
 static uint64_t event_seq;
 static SemaphoreHandle_t state_lock;
-static bool wifi_connected;
+static db_ap_state_t ap_state = DB_AP_STARTING;
+static db_sta_state_t sta_state = DB_STA_UNCONFIGURED;
+static bool sta_configured;
 static int wifi_rssi;
+static unsigned ap_client_count;
+static unsigned sta_retry_count;
+static unsigned sta_last_reason;
+static esp_netif_t *ap_netif;
+static char device_id[DB_DEVICE_ID_LEN];
+static char ap_ssid[DB_AP_SSID_LEN];
+static char sta_ssid[33];
+static char ap_ip[16];
+static char sta_ip[16];
+static bool mdns_ready;
+static EventGroupHandle_t network_events;
+#define AP_STARTED_BIT BIT0
+#define AP_START_TIMEOUT_MS 5000
+#define STA_RETRY_LIMIT 3
 static temperature_sensor_handle_t temp_sensor;
 static bool temp_available;
 static char reset_reason_text[32];
@@ -46,7 +67,7 @@ static char previous_reboot_run_id[DB_RUN_ID_LEN];
 static uint32_t boot_nonce;
 static uint32_t run_counter;
 typedef struct { uint32_t magic; char run_id[DB_RUN_ID_LEN]; } reboot_marker_t;
-RTC_DATA_ATTR static reboot_marker_t reboot_marker;
+RTC_NOINIT_ATTR static reboot_marker_t reboot_marker;
 #define REBOOT_MARKER_MAGIC 0x44524254U
 
 static uint64_t uptime_ms(void) { return (uint64_t)(esp_timer_get_time() / 1000); }
@@ -58,7 +79,9 @@ static const char *run_state_name(db_run_state_t state) {
 
 static const char *reset_name(esp_reset_reason_t reason) {
     switch (reason) {
+        case ESP_RST_UNKNOWN: return "unknown";
         case ESP_RST_POWERON: return "power_on";
+        case ESP_RST_EXT: return "external_pin";
         case ESP_RST_SW: return "software";
         case ESP_RST_PANIC: return "panic";
         case ESP_RST_INT_WDT: return "interrupt_watchdog";
@@ -66,7 +89,13 @@ static const char *reset_name(esp_reset_reason_t reason) {
         case ESP_RST_WDT: return "watchdog";
         case ESP_RST_DEEPSLEEP: return "deep_sleep";
         case ESP_RST_BROWNOUT: return "brownout";
-        default: return "other_or_unknown";
+        case ESP_RST_SDIO: return "sdio";
+        case ESP_RST_USB: return "usb";
+        case ESP_RST_JTAG: return "jtag";
+        case ESP_RST_EFUSE: return "efuse_error";
+        case ESP_RST_PWR_GLITCH: return "power_glitch";
+        case ESP_RST_CPU_LOCKUP: return "cpu_lockup";
+        default: return "unknown";
     }
 }
 
@@ -77,7 +106,7 @@ static void emit_event(const char *event, const char *phase, const char *run_id,
     cJSON_AddStringToObject(root, "event", event);
     cJSON_AddNumberToObject(root, "seq", (double)++event_seq);
     cJSON_AddNumberToObject(root, "uptime_ms", (double)uptime_ms());
-    cJSON_AddStringToObject(root, "target", "esp32s3-n8r8");
+    cJSON_AddStringToObject(root, "target", CONFIG_DB_TARGET_NAME);
     cJSON_AddStringToObject(root, "firmware_version", CONFIG_DB_FIRMWARE_VERSION);
     if (phase) cJSON_AddStringToObject(root, "phase", phase);
     if (run_id && run_id[0]) cJSON_AddStringToObject(root, "run_id", run_id);
@@ -152,23 +181,35 @@ static bool run_nvs(uint32_t duration_ms, uint64_t *bytes) {
 
 static bool partition_cycle(const esp_partition_t *partition, uint32_t duration_ms, uint64_t *bytes) {
     if (!partition || partition == esp_ota_get_running_partition()) return false;
-    uint8_t write_block[IO_BLOCK], read_block[IO_BLOCK];
+    uint8_t *buffers = malloc(IO_BLOCK * 2U);
+    if (!buffers) return false;
+    uint8_t *write_block = buffers;
+    uint8_t *read_block = buffers + IO_BLOCK;
     const uint64_t deadline = uptime_ms() + duration_ms;
     size_t offset = 0;
     *bytes = 0;
+    bool ok = true;
     while (uptime_ms() < deadline && !should_abort()) {
         if (offset + IO_BLOCK > partition->size) offset = 0;
         if ((offset % FLASH_ERASE_BLOCK) == 0 &&
-            esp_partition_erase_range(partition, offset, FLASH_ERASE_BLOCK) != ESP_OK) return false;
-        esp_fill_random(write_block, sizeof(write_block));
-        if (esp_partition_write(partition, offset, write_block, sizeof(write_block)) != ESP_OK ||
-            esp_partition_read(partition, offset, read_block, sizeof(read_block)) != ESP_OK ||
-            memcmp(write_block, read_block, sizeof(write_block)) != 0) return false;
-        offset += sizeof(write_block);
-        *bytes += sizeof(write_block);
+            esp_partition_erase_range(partition, offset, FLASH_ERASE_BLOCK) != ESP_OK) {
+            ok = false;
+            break;
+        }
+        esp_fill_random(write_block, IO_BLOCK);
+        if (esp_partition_write(partition, offset, write_block, IO_BLOCK) != ESP_OK ||
+            esp_partition_read(partition, offset, read_block, IO_BLOCK) != ESP_OK ||
+            memcmp(write_block, read_block, IO_BLOCK) != 0) {
+            ok = false;
+            break;
+        }
+        offset += IO_BLOCK;
+        *bytes += IO_BLOCK;
         taskYIELD();
     }
-    return !should_abort();
+    bool aborted = should_abort();
+    free(buffers);
+    return ok && !aborted;
 }
 
 static int connect_peer(const char *host, uint16_t port) {
@@ -237,7 +278,9 @@ static void workload_task(void *unused) {
         case DB_IDLE:
             ok = wait_abortable(run.request.duration_ms); break;
         case DB_WIFI_ASSOCIATED_IDLE:
-            ok = wifi_connected && wait_abortable(run.request.duration_ms); break;
+            ok = (sta_state == DB_STA_CONNECTED || ap_client_count > 0) &&
+                 wait_abortable(run.request.duration_ms);
+            break;
         case DB_NET_TX:
         case DB_NET_RX:
         case DB_NET_BIDIRECTIONAL:
@@ -289,8 +332,9 @@ static esp_err_t send_json(httpd_req_t *req, cJSON *root, int status) {
 static cJSON *identity_json(void) {
     cJSON *o = cJSON_CreateObject();
     cJSON_AddStringToObject(o, "product", "DragonBench");
-    cJSON_AddStringToObject(o, "target", "esp32s3-n8r8");
+    cJSON_AddStringToObject(o, "target", CONFIG_DB_TARGET_NAME);
     cJSON_AddStringToObject(o, "firmware_version", CONFIG_DB_FIRMWARE_VERSION);
+    cJSON_AddStringToObject(o, "device_id", device_id);
     cJSON_AddStringToObject(o, "image_class", "characterization");
     cJSON_AddBoolToObject(o, "heater_capability", false);
     cJSON_AddBoolToObject(o, "fan_control_capability", false);
@@ -312,7 +356,22 @@ static esp_err_t status_get(httpd_req_t *req) {
     cJSON_AddNumberToObject(o, "uptime_ms", (double)uptime_ms());
     cJSON_AddStringToObject(o, "reset_reason", reset_reason_text);
     if (previous_reboot_run_id[0]) cJSON_AddStringToObject(o, "previous_reboot_run_id", previous_reboot_run_id);
-    cJSON_AddBoolToObject(o, "network_connected", wifi_connected);
+    cJSON *network = cJSON_AddObjectToObject(o, "network");
+    cJSON_AddStringToObject(network, "mode", sta_configured ? "apsta" : "ap");
+    cJSON_AddStringToObject(network, "ap_state", db_ap_state_name(ap_state));
+    cJSON_AddBoolToObject(network, "ap_active", ap_state == DB_AP_ACTIVE);
+    cJSON_AddStringToObject(network, "ap_ssid", ap_ssid);
+    cJSON_AddStringToObject(network, "ap_ip", ap_ip);
+    cJSON_AddNumberToObject(network, "ap_client_count", ap_client_count);
+    cJSON_AddStringToObject(network, "sta_state", db_sta_state_name(sta_state));
+    cJSON_AddStringToObject(network, "sta_ssid", sta_ssid);
+    cJSON_AddNumberToObject(network, "sta_last_disconnect_reason", sta_last_reason);
+    cJSON_AddBoolToObject(network, "sta_configured", sta_configured);
+    cJSON_AddBoolToObject(network, "sta_connected", sta_state == DB_STA_CONNECTED);
+    if (sta_state == DB_STA_CONNECTED) cJSON_AddStringToObject(network, "sta_ip", sta_ip);
+    cJSON_AddStringToObject(network, "mdns_hostname", CONFIG_DB_HOSTNAME);
+    cJSON_AddBoolToObject(network, "mdns_ready", mdns_ready);
+    cJSON_AddBoolToObject(o, "network_connected", sta_state == DB_STA_CONNECTED);
     return send_json(req, o, 200);
 }
 
@@ -331,7 +390,9 @@ static esp_err_t sensors_get(httpd_req_t *req) {
     float temperature = 0;
     bool temp_ok = temp_available && temperature_sensor_get_celsius(temp_sensor, &temperature) == ESP_OK;
     add_sensor(a, "soc_temperature", "SoC temperature", "degC", "on_die", temp_ok ? "available" : "unavailable", temperature, temp_ok);
-    add_sensor(a, "wifi_rssi", "Wi-Fi RSSI", "dBm", "wifi", wifi_connected ? "available" : "unavailable", wifi_rssi, wifi_connected);
+    add_sensor(a, "wifi_rssi", "Station Wi-Fi RSSI", "dBm", "wifi",
+               sta_state == DB_STA_CONNECTED ? "available" : "unavailable", wifi_rssi,
+               sta_state == DB_STA_CONNECTED);
     add_sensor(a, "supply_voltage", "MCU supply voltage", "V", "none", "unsupported", 0, false);
     add_sensor(a, "supply_current", "MCU supply current", "A", "none", "unsupported", 0, false);
     return send_json(req, root, 200);
@@ -684,13 +745,170 @@ static const char landing[] =
 
 static esp_err_t landing_get(httpd_req_t *req) { httpd_resp_set_type(req, "text/html"); return httpd_resp_send(req, landing, HTTPD_RESP_USE_STRLEN); }
 
+static const char setup_page[] =
+"<!doctype html>"
+"<html lang=\"en\">"
+"<head>"
+"<meta charset=\"utf-8\">"
+"<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+"<meta name=\"color-scheme\" content=\"light dark\">"
+"<title>DragonBench Wi-Fi setup</title>"
+"<style>"
+":root{color-scheme:light dark;--bg:light-dark(#fff,#181818);--fg:light-dark(#1a1c1f,#fff);"
+"--card:color-mix(in oklab, var(--fg) 5%, transparent);--muted-fg:light-dark(rgba(26,28,31,.58),rgba(255,255,255,.58));"
+"--border:light-dark(rgba(26,28,31,.1),rgba(255,255,255,.1));--primary:light-dark(#339cff,#83c3ff);--radius:6px;--radius-sm:4px}"
+"*{box-sizing:border-box}"
+"body{margin:0;min-height:100vh;color:var(--fg);background:var(--bg);font:14px/1.4 -apple-system,system-ui,\"Segoe UI\",Roboto,sans-serif;padding:0 16px}"
+"main{width:min(560px,100%);margin:0 auto;padding:20px 0;display:grid;gap:12px}"
+"h1{margin:0;font-size:1.6rem;letter-spacing:-.02em}"
+"p{margin:0;color:var(--muted-fg)}"
+".panel{border:1px solid var(--border);border-radius:var(--radius);background:var(--card);padding:14px;display:grid;gap:10px}"
+"label{display:grid;gap:4px;color:var(--muted-fg);font-size:.8rem}"
+"input,button{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px}"
+"button{cursor:pointer;border-color:var(--primary);color:var(--primary);font-weight:700}"
+"dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 12px;margin:0}"
+"dt{color:var(--muted-fg)}dd{margin:0;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}"
+"a{color:var(--primary)}"
+"</style>"
+"</head>"
+"<body>"
+"<main>"
+"  <h1>Wi-Fi setup</h1>"
+"  <p>Join this DragonBench to a 2.4 GHz network. The direct access point stays up, but may drop for a few seconds while the radio moves to the network's channel.</p>"
+"  <form class=\"panel\" data-role=\"sta-form\">"
+"    <label>Network name (SSID)<input data-role=\"sta-ssid\" maxlength=\"31\" required autocomplete=\"off\"></label>"
+"    <label>Password (blank for an open network)<input data-role=\"sta-password\" type=\"password\" maxlength=\"63\" autocomplete=\"off\"></label>"
+"    <button type=\"submit\">Connect</button>"
+"    <p data-role=\"sta-message\"></p>"
+"  </form>"
+"  <section class=\"panel\" aria-label=\"Station status\">"
+"    <dl>"
+"      <dt>State</dt><dd data-role=\"sta-state\">&mdash;</dd>"
+"      <dt>Network</dt><dd data-role=\"sta-current\">&mdash;</dd>"
+"      <dt>Address</dt><dd data-role=\"sta-ip\">&mdash;</dd>"
+"      <dt>Last disconnect reason</dt><dd data-role=\"sta-reason\">&mdash;</dd>"
+"    </dl>"
+"  </section>"
+"  <p><a href=\"/\">Back to the dashboard</a></p>"
+"</main>"
+"<script>"
+"(function(){"
+"  function role(name){return document.querySelector('[data-role=\"'+name+'\"]')}"
+"  function show(name,value){role(name).textContent=value===undefined||value===null||value===''||value===0?'—':String(value)}"
+"  var message=role('sta-message');"
+"  role('sta-form').addEventListener('submit',function(event){"
+"    event.preventDefault();"
+"    message.textContent='Sending…';"
+"    fetch('/api/v1/network/sta',{method:'POST',headers:{'Content-Type':'application/json'},"
+"      body:JSON.stringify({ssid:role('sta-ssid').value,password:role('sta-password').value})})"
+"    .then(function(res){return res.json().then(function(data){return {ok:res.ok,data:data}})})"
+"    .then(function(r){message.textContent=r.ok?'Connecting to '+r.data.ssid+'…':'Rejected: '+(r.data.error||'unknown error')})"
+"    .catch(function(){message.textContent='No response. If the access point dropped, reconnect to it and reload this page.'});"
+"  });"
+"  function poll(){"
+"    fetch('/api/v1/status',{cache:'no-store'}).then(function(res){return res.json()}).then(function(data){"
+"      var n=data.network||{};"
+"      show('sta-state',n.sta_state);show('sta-current',n.sta_ssid);show('sta-ip',n.sta_ip);show('sta-reason',n.sta_last_disconnect_reason);"
+"    }).catch(function(){});"
+"  }"
+"  poll();"
+"  setInterval(poll,2000);"
+"})();"
+"</script>"
+"</body>"
+"</html>";
+
+static esp_err_t setup_get(httpd_req_t *req) { httpd_resp_set_type(req, "text/html"); return httpd_resp_send(req, setup_page, HTTPD_RESP_USE_STRLEN); }
+
+#define WIFI_NVS_NAMESPACE "db_wifi"
+
+static bool nvs_load_sta(char *ssid, size_t ssid_size, char *password, size_t password_size) {
+    nvs_handle_t handle;
+    if (nvs_open(WIFI_NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) return false;
+    size_t ssid_len = ssid_size;
+    esp_err_t ssid_err = nvs_get_str(handle, "ssid", ssid, &ssid_len);
+    size_t password_len = password_size;
+    esp_err_t password_err = nvs_get_str(handle, "password", password, &password_len);
+    nvs_close(handle);
+    if (password_err != ESP_OK) password[0] = '\0';
+    return ssid_err == ESP_OK && ssid[0] != '\0';
+}
+
+static bool nvs_save_sta(const char *ssid, const char *password) {
+    nvs_handle_t handle;
+    if (nvs_open(WIFI_NVS_NAMESPACE, NVS_READWRITE, &handle) != ESP_OK) return false;
+    bool ok = nvs_set_str(handle, "ssid", ssid) == ESP_OK &&
+              nvs_set_str(handle, "password", password ? password : "") == ESP_OK &&
+              nvs_commit(handle) == ESP_OK;
+    nvs_close(handle);
+    return ok;
+}
+
+static bool configure_sta(const char *ssid, const char *password) {
+    wifi_config_t sta = {0};
+    int ssid_len = snprintf((char *)sta.sta.ssid, sizeof(sta.sta.ssid), "%s", ssid);
+    int password_len = snprintf((char *)sta.sta.password, sizeof(sta.sta.password), "%s", password ? password : "");
+    if (ssid_len < 1 || (size_t)ssid_len >= sizeof(sta.sta.ssid) ||
+        password_len < 0 || (size_t)password_len >= sizeof(sta.sta.password)) return false;
+    sta.sta.threshold.authmode = (password && password[0]) ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
+    if (esp_wifi_set_config(WIFI_IF_STA, &sta) != ESP_OK) return false;
+    snprintf(sta_ssid, sizeof(sta_ssid), "%s", ssid);
+    return true;
+}
+
+static void sta_connect_task(void *unused) {
+    (void)unused;
+    vTaskDelay(pdMS_TO_TICKS(300));
+    esp_wifi_disconnect();
+    esp_wifi_connect();
+    vTaskDelete(NULL);
+}
+
+static esp_err_t network_sta_post(httpd_req_t *req) {
+    cJSON *body = read_body(req);
+    cJSON *ssid = body ? cJSON_GetObjectItemCaseSensitive(body, "ssid") : NULL;
+    cJSON *password = body ? cJSON_GetObjectItemCaseSensitive(body, "password") : NULL;
+    const char *password_value = cJSON_IsString(password) ? password->valuestring : "";
+    bool valid = cJSON_IsString(ssid) && ssid->valuestring[0] != '\0' && strlen(ssid->valuestring) < 32 &&
+                 (password_value[0] == '\0' || strlen(password_value) >= 8) && strlen(password_value) < 64;
+    if (!valid) {
+        cJSON_Delete(body);
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddStringToObject(o, "error", "ssid required (<32 chars); password must be empty or 8-63 chars");
+        return send_json(req, o, 400);
+    }
+    bool ok = configure_sta(ssid->valuestring, password_value);
+    if (ok) {
+        sta_configured = true;
+        sta_retry_count = 0;
+        sta_state = DB_STA_CONNECTING;
+        if (!nvs_save_sta(ssid->valuestring, password_value))
+            ESP_LOGW(TAG, "station credentials applied but not persisted to NVS");
+    }
+    cJSON *o = cJSON_CreateObject();
+    if (!ok) {
+        cJSON_Delete(body);
+        cJSON_AddStringToObject(o, "error", "failed to apply wifi config");
+        return send_json(req, o, 400);
+    }
+    cJSON_AddStringToObject(o, "state", "connecting");
+    cJSON_AddStringToObject(o, "ssid", ssid->valuestring);
+    cJSON_Delete(body);
+    esp_err_t send_result = send_json(req, o, 200);
+    if (xTaskCreate(sta_connect_task, "db_sta_connect", 3072, NULL, 5, NULL) != pdPASS)
+        ESP_LOGE(TAG, "station connect task creation failed");
+    return send_result;
+}
+
 static void start_http(void) {
     const httpd_uri_t routes[] = {
-        {.uri="/",.method=HTTP_GET,.handler=landing_get}, {.uri="/api/v1/device",.method=HTTP_GET,.handler=device_get},
+        {.uri="/",.method=HTTP_GET,.handler=landing_get}, {.uri="/setup",.method=HTTP_GET,.handler=setup_get},
+        {.uri="/api/v1/device",.method=HTTP_GET,.handler=device_get},
         {.uri="/api/v1/status",.method=HTTP_GET,.handler=status_get}, {.uri="/api/v1/sensors",.method=HTTP_GET,.handler=sensors_get},
         {.uri="/api/v1/workloads",.method=HTTP_GET,.handler=workloads_get}, {.uri="/api/v1/runs",.method=HTTP_POST,.handler=runs_post},
         {.uri="/api/v1/runs/*/abort",.method=HTTP_POST,.handler=abort_post}, {.uri="/api/v1/runs/*",.method=HTTP_GET,.handler=run_get},
         {.uri="/api/v1/events",.method=HTTP_GET,.handler=events_get},
+        {.uri="/api/v1/network/sta",.method=HTTP_POST,.handler=network_sta_post},
     };
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.uri_match_fn = httpd_uri_match_wildcard;
@@ -701,30 +919,104 @@ static void start_http(void) {
 
 static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
     (void)arg;
-    (void)data;
-    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START && CONFIG_DB_WIFI_SSID[0] != '\0') esp_wifi_connect();
-    else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
-        wifi_connected = false;
-        if (CONFIG_DB_WIFI_SSID[0] != '\0') esp_wifi_connect();
-    }
-    else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
-        wifi_connected = true;
+    if (base == WIFI_EVENT && id == WIFI_EVENT_AP_START) {
+        esp_netif_ip_info_t info;
+        if (ap_netif && esp_netif_get_ip_info(ap_netif, &info) == ESP_OK) {
+            snprintf(ap_ip, sizeof(ap_ip), IPSTR, IP2STR(&info.ip));
+            ap_state = DB_AP_ACTIVE;
+            xEventGroupSetBits(network_events, AP_STARTED_BIT);
+        } else {
+            ap_state = DB_AP_FAILED;
+        }
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_AP_STACONNECTED) {
+        wifi_event_ap_staconnected_t *event = data;
+        (void)event;
+        ++ap_client_count;
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_AP_STADISCONNECTED) {
+        if (ap_client_count > 0) --ap_client_count;
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_CONNECTED) {
+        wifi_event_sta_connected_t *event = data;
+        ESP_LOGI(TAG, "sta_associated channel=%u authmode=%d", event->channel, event->authmode);
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        wifi_event_sta_disconnected_t *event = data;
+        sta_last_reason = event->reason;
+        ESP_LOGW(TAG, "sta_disconnected ssid=%.*s reason=%u rssi=%d retry=%u", event->ssid_len,
+                 (const char *)event->ssid, event->reason, event->rssi, sta_retry_count);
+        sta_state = DB_STA_DISCONNECTED;
+        if (event->reason == WIFI_REASON_ASSOC_LEAVE) return;
+        if (sta_configured && sta_retry_count++ < STA_RETRY_LIMIT) {
+            sta_state = DB_STA_CONNECTING;
+            esp_wifi_connect();
+        }
+    } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+        ip_event_got_ip_t *event = data;
+        snprintf(sta_ip, sizeof(sta_ip), IPSTR, IP2STR(&event->ip_info.ip));
+        sta_state = DB_STA_CONNECTED;
+        sta_retry_count = 0;
         wifi_ap_record_t record;
         if (esp_wifi_sta_get_ap_info(&record) == ESP_OK) wifi_rssi = record.rssi;
     }
 }
 
-static void start_wifi(void) {
-    ESP_ERROR_CHECK(esp_netif_init()); ESP_ERROR_CHECK(esp_event_loop_create_default()); esp_netif_create_default_wifi_sta();
-    wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT(); ESP_ERROR_CHECK(esp_wifi_init(&init));
+static bool start_wifi(void) {
+    uint8_t mac[6];
+    char suffix[DB_DEVICE_SUFFIX_LEN];
+    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK ||
+        !db_network_identity(mac, suffix, sizeof(suffix), device_id, sizeof(device_id),
+                             ap_ssid, sizeof(ap_ssid))) return false;
+    char sta_ssid_buf[33] = {0};
+    char sta_password_buf[65] = {0};
+    if (!nvs_load_sta(sta_ssid_buf, sizeof(sta_ssid_buf), sta_password_buf, sizeof(sta_password_buf))) {
+        snprintf(sta_ssid_buf, sizeof(sta_ssid_buf), "%s", CONFIG_DB_WIFI_SSID);
+        snprintf(sta_password_buf, sizeof(sta_password_buf), "%s", CONFIG_DB_WIFI_PASSWORD);
+    }
+    sta_configured = db_sta_is_configured(sta_ssid_buf);
+    sta_state = sta_configured ? DB_STA_CONNECTING : DB_STA_UNCONFIGURED;
+    network_events = xEventGroupCreate();
+    if (!network_events || esp_netif_init() != ESP_OK ||
+        esp_event_loop_create_default() != ESP_OK) return false;
+    ap_netif = esp_netif_create_default_wifi_ap();
+    if (!ap_netif) return false;
+    if (!esp_netif_create_default_wifi_sta()) return false;
+    wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
+    if (esp_wifi_init(&init) != ESP_OK) return false;
     esp_event_handler_instance_t any, got;
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event, NULL, &any));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event, NULL, &got));
-    wifi_config_t config = {0};
-    snprintf((char *)config.sta.ssid, sizeof(config.sta.ssid), "%s", CONFIG_DB_WIFI_SSID);
-    snprintf((char *)config.sta.password, sizeof(config.sta.password), "%s", CONFIG_DB_WIFI_PASSWORD);
-    config.sta.threshold.authmode = CONFIG_DB_WIFI_PASSWORD[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA)); ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &config)); ESP_ERROR_CHECK(esp_wifi_start());
+    if (esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event, NULL, &any) != ESP_OK ||
+        esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event, NULL, &got) != ESP_OK) return false;
+    wifi_config_t ap = {0};
+    int ssid_len = snprintf((char *)ap.ap.ssid, sizeof(ap.ap.ssid), "%s", ap_ssid);
+    int password_len = snprintf((char *)ap.ap.password, sizeof(ap.ap.password), "%s", CONFIG_DB_AP_PASSWORD);
+    if (ssid_len < 1 || (size_t)ssid_len >= sizeof(ap.ap.ssid) || password_len < 8 ||
+        (size_t)password_len >= sizeof(ap.ap.password)) return false;
+    ap.ap.ssid_len = (uint8_t)ssid_len;
+    ap.ap.channel = 1;
+    ap.ap.authmode = WIFI_AUTH_WPA2_PSK;
+    ap.ap.max_connection = 4;
+    if (esp_wifi_set_mode(WIFI_MODE_APSTA) != ESP_OK || esp_wifi_set_config(WIFI_IF_AP, &ap) != ESP_OK) return false;
+    if (sta_configured && !configure_sta(sta_ssid_buf, sta_password_buf)) return false;
+    if (esp_wifi_start() != ESP_OK) return false;
+    EventBits_t ready = xEventGroupWaitBits(network_events, AP_STARTED_BIT, pdFALSE, pdTRUE,
+                                             pdMS_TO_TICKS(AP_START_TIMEOUT_MS));
+    if ((ready & AP_STARTED_BIT) == 0 || ap_state != DB_AP_ACTIVE) return false;
+    wifi_config_t observed = {0};
+    uint8_t primary = 0, protocol = 0;
+    wifi_second_chan_t secondary = WIFI_SECOND_CHAN_NONE;
+    int8_t tx_power = 0;
+    if (esp_wifi_get_config(WIFI_IF_AP, &observed) != ESP_OK ||
+        esp_wifi_get_channel(&primary, &secondary) != ESP_OK ||
+        esp_wifi_get_protocol(WIFI_IF_AP, &protocol) != ESP_OK ||
+        esp_wifi_get_max_tx_power(&tx_power) != ESP_OK) return false;
+    ESP_LOGI(TAG, "ap_config ssid_len=%u channel=%u auth=%d protocol=0x%02x tx_power_qdbm=%d",
+             observed.ap.ssid_len, primary, observed.ap.authmode, protocol, tx_power);
+    return true;
+}
+
+static void antenna_init(void) {
+#if CONFIG_DB_RF_SWITCH_GPIO >= 0
+    gpio_reset_pin(CONFIG_DB_RF_SWITCH_GPIO);
+    gpio_set_direction(CONFIG_DB_RF_SWITCH_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_level(CONFIG_DB_RF_SWITCH_GPIO, 0);
+#endif
 }
 
 void app_main(void) {
@@ -746,8 +1038,29 @@ void app_main(void) {
     const char *prior_run = previous_reboot_run_id[0] ? previous_reboot_run_id : NULL;
     emit_event("boot", NULL, prior_run, NULL, NULL, NULL);
     emit_event("reset_reason", NULL, prior_run, NULL, NULL, reset_metrics);
-    start_wifi();
-    ESP_ERROR_CHECK(mdns_init()); ESP_ERROR_CHECK(mdns_hostname_set(CONFIG_DB_HOSTNAME)); ESP_ERROR_CHECK(mdns_instance_name_set("DragonBench characterization harness"));
-    ESP_ERROR_CHECK(mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0));
-    start_http(); emit_event("ready", NULL, prior_run, NULL, NULL, NULL);
+    antenna_init();
+    if (!start_wifi()) {
+        ap_state = DB_AP_FAILED;
+        ESP_LOGE(TAG, "default access point failed to start; device is not network-ready");
+        return;
+    }
+    if (sta_configured) {
+        ESP_LOGI(TAG, "sta_connect ssid=%s", sta_ssid);
+        sta_state = DB_STA_CONNECTING;
+        esp_wifi_connect();
+    }
+    ESP_LOGI(TAG, "DragonBench %s", CONFIG_DB_FIRMWARE_VERSION);
+    ESP_LOGI(TAG, "device_id=%s", device_id);
+    ESP_LOGI(TAG, "network_mode=%s", sta_configured ? "apsta" : "ap");
+    ESP_LOGI(TAG, "ssid=%s", ap_ssid);
+    ESP_LOGI(TAG, "ap_ip=%s", ap_ip);
+    esp_err_t mdns_result = mdns_init();
+    if (mdns_result == ESP_OK) mdns_result = mdns_hostname_set(CONFIG_DB_HOSTNAME);
+    if (mdns_result == ESP_OK) mdns_result = mdns_instance_name_set("DragonBench characterization harness");
+    if (mdns_result == ESP_OK) mdns_result = mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
+    mdns_ready = mdns_result == ESP_OK;
+    if (mdns_ready) ESP_LOGI(TAG, "mdns=%s.local", CONFIG_DB_HOSTNAME);
+    else ESP_LOGW(TAG, "mDNS unavailable (%s); use AP IP", esp_err_to_name(mdns_result));
+    start_http();
+    emit_event("ready", NULL, prior_run, NULL, NULL, NULL);
 }

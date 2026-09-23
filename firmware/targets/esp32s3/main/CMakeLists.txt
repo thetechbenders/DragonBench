@@ -12,6 +12,7 @@ idf_component_register(
         app_update
         esp_partition
         esp_driver_tsens
+        esp_driver_gpio
         esp_timer
         json
 )

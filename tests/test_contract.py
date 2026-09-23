@@ -11,15 +11,15 @@ WORKLOADS = [
 ]
 
 
-def _firmware_landing_html():
-    """Extract and de-escape the embedded landing[] C string from main.c.
+def _firmware_page(name):
+    """Extract and de-escape an embedded page (e.g. landing[]) C string from main.c.
 
     Isolating this from the rest of main.c matters: the file also legitimately
     contains the /api/v1/runs route registrations, which would otherwise
     false-positive a "no write controls in the landing page" check.
     """
     source = (ROOT / "firmware/targets/esp32s3/main/main.c").read_text()
-    start = source.index("static const char landing[] =")
+    start = source.index(f"static const char {name}[] =")
     i, in_string, end = start, False, None
     while i < len(source):
         ch = source[i]
@@ -74,7 +74,7 @@ class ContractTests(unittest.TestCase):
         difference the two pages would ever actually render.
         """
         web = (ROOT / "web/index.html").read_text()
-        firmware_landing = _firmware_landing_html()
+        firmware_landing = _firmware_page("landing")
         version_slot = re.compile(r"(Firmware: )(.*?)(</p>)")
 
         def normalize(html):
@@ -85,7 +85,7 @@ class ContractTests(unittest.TestCase):
 
     def test_landing_page_represents_actuator_boundary(self):
         web = (ROOT / "web/index.html").read_text()
-        firmware_landing = _firmware_landing_html()
+        firmware_landing = _firmware_page("landing")
         for page in (web, firmware_landing):
             self.assertIn("CHARACTERIZATION IMAGE", page.upper())
             self.assertIn("NO PRODUCT ACTUATOR SUPPORT", page.upper())
@@ -95,7 +95,7 @@ class ContractTests(unittest.TestCase):
 
     def test_landing_page_has_stable_automation_hooks(self):
         web = (ROOT / "web/index.html").read_text()
-        firmware_landing = _firmware_landing_html()
+        firmware_landing = _firmware_page("landing")
         required_hooks = (
             "panel-status", "panel-sensors", "panel-workloads",
             "capability-heater", "capability-fan",
@@ -108,7 +108,7 @@ class ContractTests(unittest.TestCase):
 
     def test_landing_page_has_no_external_dependency(self):
         web = (ROOT / "web/index.html").read_text()
-        firmware_landing = _firmware_landing_html()
+        firmware_landing = _firmware_page("landing")
         forbidden = ("http://", "https://", "cdn.", "//fonts.")
         for page in (web, firmware_landing):
             for token in forbidden:
@@ -116,13 +116,13 @@ class ContractTests(unittest.TestCase):
 
     def test_landing_page_avoids_innerhtml_for_dut_values(self):
         web = (ROOT / "web/index.html").read_text()
-        firmware_landing = _firmware_landing_html()
+        firmware_landing = _firmware_page("landing")
         for page in (web, firmware_landing):
             self.assertNotIn("innerHTML", page)
 
     def test_landing_page_has_no_write_controls(self):
         web = (ROOT / "web/index.html").read_text()
-        firmware_landing = _firmware_landing_html()
+        firmware_landing = _firmware_page("landing")
         forbidden_exact = ("/api/v1/runs",)
         forbidden_ci = ("method=\"post\"", "method='post'")
         for page in (web, firmware_landing):
@@ -164,7 +164,64 @@ class ContractTests(unittest.TestCase):
         source = (ROOT / "firmware/targets/esp32s3/main/main.c").read_text()
         self.assertIn('"reset_reason"', source)
         self.assertIn('previous_reboot_run_id', source)
-        self.assertIn('RTC_DATA_ATTR', source)
+        self.assertIn('RTC_NOINIT_ATTR', source)
+        for mapping in ('ESP_RST_USB: return "usb"', 'ESP_RST_JTAG: return "jtag"',
+                        'ESP_RST_PWR_GLITCH: return "power_glitch"'):
+            self.assertIn(mapping, source)
+
+    def test_direct_ap_is_default_and_credentials_are_not_serialized(self):
+        source = (ROOT / "firmware/targets/esp32s3/main/main.c").read_text()
+        kconfig = (ROOT / "firmware/targets/esp32s3/main/Kconfig.projbuild").read_text()
+        self.assertIn("esp_netif_create_default_wifi_ap", source)
+        self.assertIn("WIFI_MODE_AP", source)
+        self.assertIn("WIFI_AUTH_WPA2_PSK", source)
+        self.assertIn('default "Dragon$ru1e"', kconfig)
+        serializers = source[source.index("static cJSON *identity_json"):source.index("static void wifi_event")]
+        self.assertNotIn("CONFIG_DB_AP_PASSWORD", serializers)
+        self.assertNotIn("CONFIG_DB_WIFI_PASSWORD", serializers)
+
+    def test_network_connected_reports_station_association(self):
+        # tools/reset_characterization.py records this field as sta_associated.
+        source = (ROOT / "firmware/targets/esp32s3/main/main.c").read_text()
+        self.assertIn('"network_connected", sta_state == DB_STA_CONNECTED', source)
+
+    def test_station_password_is_never_serialized(self):
+        source = (ROOT / "firmware/targets/esp32s3/main/main.c").read_text()
+        self.assertIsNone(re.search(r'cJSON_Add\w*ToObject\([^;]*"password"', source))
+
+    def test_setup_page_only_writes_station_config(self):
+        setup = _firmware_page("setup_page")
+        main = (ROOT / "firmware/targets/esp32s3/main/main.c").read_text()
+        self.assertIn('.uri="/setup"', main)
+        self.assertIn("/api/v1/network/sta", setup)
+        self.assertNotIn("/api/v1/runs", setup)
+        self.assertNotIn("innerHTML", setup)
+        for token in ("http://", "https://", "cdn.", "//fonts."):
+            self.assertNotIn(token, setup)
+
+    def test_board_profiles_report_schema_targets(self):
+        schema = json.loads((ROOT / "protocol/event.schema.json").read_text())
+        targets = schema["properties"]["target"]["enum"]
+        kconfig = (ROOT / "firmware/targets/esp32s3/main/Kconfig.projbuild").read_text()
+        base = (ROOT / "sdkconfig.defaults").read_text()
+        tinys3d = (ROOT / "sdkconfig.defaults.tinys3d").read_text()
+        default_target = re.search(r'config DB_TARGET_NAME\n(?:.*\n)*?\s+default "([^"]+)"', kconfig).group(1)
+        self.assertEqual(default_target, "esp32s3-n8r8")
+        self.assertIn(default_target, targets)
+        self.assertIn("CONFIG_SPIRAM_MODE_OCT=y", base)
+        self.assertIn('CONFIG_DB_TARGET_NAME="esp32s3-tinys3d"', tinys3d)
+        self.assertIn("esp32s3-tinys3d", targets)
+        self.assertIn("CONFIG_SPIRAM_MODE_QUAD=y", tinys3d)
+        self.assertIn("CONFIG_DB_RF_SWITCH_GPIO=38", tinys3d)
+
+    def test_rf_switch_selects_onboard_antenna_before_wifi_starts(self):
+        source = (ROOT / "firmware/targets/esp32s3/main/main.c").read_text()
+        init = source[source.index("static void antenna_init"):]
+        init = init[:init.index("\n}\n")]
+        self.assertIn("gpio_set_level(CONFIG_DB_RF_SWITCH_GPIO, 0)", init)
+        self.assertNotIn("gpio_set_level(CONFIG_DB_RF_SWITCH_GPIO, 1)", source)
+        app_main = source[source.index("void app_main(void)"):]
+        self.assertLess(app_main.index("antenna_init();"), app_main.index("start_wifi()"))
 
 
 if __name__ == "__main__":

@@ -34,11 +34,12 @@ Wi-Fi credentials are local configuration. The target does not claim supply
 voltage/current sensing. Brownout evidence is limited to the reset reason
 reported after boot; it is not a calibrated voltage measurement.
 
-DragonBench creates one Wi-Fi station interface and no AP or Ethernet netif.
-Accordingly, `sdkconfig.defaults` enables only the predefined mDNS STA interface.
-It allocates two mDNS entries because mDNS 1.12.0's duplicate-interface logic
-requires a two-entry array even for one predefined netif; this is implementation
-capacity, not a second DragonBench interface. Generated `sdkconfig` and
+DragonBench creates a Wi-Fi access-point netif and a station netif, and no
+Ethernet netif. The access point always runs; the station joins a network only
+when one is configured through Kconfig or the `/setup` page. Accordingly,
+`sdkconfig.defaults` enables both predefined mDNS interfaces within its
+two-entry capacity. This profile is the default; the TinyS3[D] is described in
+[its own profile](TARGET_TINYS3D.md). Generated `sdkconfig` and
 `managed_components/` remain local; the Component Manager lockfile is tracked
 to preserve the dependency graph used by the validated build.
 

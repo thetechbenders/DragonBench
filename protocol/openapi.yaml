@@ -37,3 +37,20 @@ paths:
       parameters: [{name: id, in: path, required: true, schema: {type: string}}]
   /api/v1/events:
     get: {summary: Snapshot event stream as application/x-ndjson}
+  /api/v1/network/sta:
+    post:
+      summary: Set station Wi-Fi credentials, persist them in NVS, and connect
+      description: >-
+        Responds before the radio reconnects; the direct access point may drop
+        briefly while it moves to the network's channel. Poll /api/v1/status
+        network.sta_state for the result. The password is never returned.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ssid]
+              properties:
+                ssid: {type: string, minLength: 1, maxLength: 31}
+                password: {type: string, description: "Empty for an open network, otherwise 8-63 characters"}
