@@ -216,6 +216,9 @@ class ContractTests(unittest.TestCase):
         main = (ROOT / "firmware/targets/esp32s3/main/main.c").read_text()
         self.assertIn('.uri="/setup"', main)
         self.assertIn("/api/v1/network/sta", setup)
+        self.assertIn('data-role="sta-freshness"', setup)
+        self.assertIn("if(inFlight)return;", setup)
+        self.assertIn("config.lru_purge_enable = true;", main)
         self.assertNotIn("/api/v1/runs", setup)
         self.assertNotIn("innerHTML", setup)
         for token in ("http://", "https://", "cdn.", "//fonts."):
