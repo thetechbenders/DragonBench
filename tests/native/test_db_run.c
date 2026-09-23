@@ -1,9 +1,42 @@
 #include "db_run.h"
+#include "db_network.h"
 
 #include <assert.h>
+#include <limits.h>
 #include <string.h>
 
 int main(void) {
+    const uint8_t mac[] = {0x3c, 0x0f, 0x02, 0xe2, 0xa1, 0x2c};
+    char suffix[DB_DEVICE_SUFFIX_LEN];
+    char device_id[DB_DEVICE_ID_LEN];
+    char ssid[DB_AP_SSID_LEN];
+    assert(db_network_identity(mac, suffix, sizeof(suffix), device_id, sizeof(device_id), ssid, sizeof(ssid)));
+    assert(strcmp(suffix, "E2A12C") == 0);
+    assert(strcmp(device_id, "dragonbench-E2A12C") == 0);
+    assert(strcmp(ssid, "DragonBench-E2A12C") == 0);
+    assert(!db_network_identity(NULL, suffix, sizeof(suffix), device_id, sizeof(device_id), ssid, sizeof(ssid)));
+    assert(!db_network_identity(mac, suffix, sizeof(suffix) - 1, device_id, sizeof(device_id), ssid, sizeof(ssid)));
+    assert(!db_sta_is_configured(NULL));
+    assert(!db_sta_is_configured(""));
+    assert(db_sta_is_configured("synthetic-lab-network"));
+    assert(strcmp(db_ap_state_name(DB_AP_STARTING), "starting") == 0);
+    assert(strcmp(db_ap_state_name(DB_AP_ACTIVE), "active") == 0);
+    assert(strcmp(db_ap_state_name(DB_AP_FAILED), "failed") == 0);
+    assert(strcmp(db_sta_state_name(DB_STA_UNCONFIGURED), "unconfigured") == 0);
+    static const uint32_t expected_delays[] = {0, 0, 0, 5000, 10000, 20000, 40000, 60000, 60000};
+    for (unsigned i = 0; i < sizeof(expected_delays) / sizeof(expected_delays[0]); ++i)
+        assert(db_sta_retry_delay_ms(i) == expected_delays[i]);
+    assert(db_sta_retry_delay_ms(UINT_MAX) == DB_STA_BACKOFF_MAX_MS);
+    char hostname[32];
+    assert(db_mdns_hostname("", "dragonbench-E2A12C", hostname, sizeof(hostname)));
+    assert(strcmp(hostname, "dragonbench-e2a12c") == 0);
+    assert(db_mdns_hostname(NULL, "dragonbench-E2A12C", hostname, sizeof(hostname)));
+    assert(strcmp(hostname, "dragonbench-e2a12c") == 0);
+    assert(db_mdns_hostname("Bench-A", "dragonbench-E2A12C", hostname, sizeof(hostname)));
+    assert(strcmp(hostname, "bench-a") == 0);
+    assert(!db_mdns_hostname("", "", hostname, sizeof(hostname)));
+    assert(!db_mdns_hostname("", "dragonbench-E2A12C", hostname, 8));
+
     db_workload_t workload = DB_WORKLOAD_COUNT;
     assert(db_workload_parse("CPU_STRESS", &workload));
     assert(workload == DB_CPU_STRESS);

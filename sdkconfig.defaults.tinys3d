@@ -1,0 +1,10 @@
+# Unexpected Maker TinyS3[D]: ESP32-S3FN8 (8 MB flash) with an external 8 MB
+# Quad SPI PSRAM chip, native USB Serial/JTAG, and an onboard/U.FL RF switch.
+# Build with:
+#   idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.tinys3d" build
+CONFIG_DB_TARGET_NAME="esp32s3-tinys3d"
+CONFIG_DB_RF_SWITCH_GPIO=38
+CONFIG_SPIRAM_MODE_QUAD=y
+# CONFIG_SPIRAM_MODE_OCT is not set
+CONFIG_SPIRAM_SPEED_40M=y
+# CONFIG_SPIRAM_SPEED_80M is not set

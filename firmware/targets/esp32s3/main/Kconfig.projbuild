@@ -1,14 +1,33 @@
 menu "DragonBench"
 config DB_WIFI_SSID
-    string "Wi-Fi SSID"
+    string "Optional station Wi-Fi SSID"
     default ""
 config DB_WIFI_PASSWORD
-    string "Wi-Fi password"
+    string "Optional station Wi-Fi password"
     default ""
+config DB_AP_PASSWORD
+    string "Direct access-point password"
+    default "Dragon$ru1e"
 config DB_HOSTNAME
-    string "mDNS hostname"
-    default "dragonbench"
+    string "mDNS hostname (empty: per-board dragonbench-xxxxxx)"
+    default ""
+    help
+        Empty derives a unique name from the MAC suffix, matching the access
+        point name, so several boards on one network never share a name.
 config DB_FIRMWARE_VERSION
     string "Firmware version"
     default "0.1.0"
+config DB_TARGET_NAME
+    string "Target identifier reported in events and /api/v1/device"
+    default "esp32s3-n8r8"
+    help
+        Must be one of the target values in protocol/event.schema.json.
+        Set per board by the sdkconfig.defaults.<board> overlay.
+config DB_RF_SWITCH_GPIO
+    int "Antenna RF-switch select GPIO (-1 if the board has none)"
+    range -1 48
+    default -1
+    help
+        Driven low at boot to select the onboard antenna.
+        TinyS3[D]: GPIO38 (high selects the external U.FL connector).
 endmenu

@@ -1,0 +1,46 @@
+#include "db_network.h"
+
+#include <stdio.h>
+
+bool db_network_identity(const uint8_t mac[6], char *suffix, size_t suffix_size,
+                         char *device_id, size_t device_id_size,
+                         char *ssid, size_t ssid_size) {
+    if (!mac || !suffix || !device_id || !ssid ||
+        suffix_size < DB_DEVICE_SUFFIX_LEN || device_id_size < DB_DEVICE_ID_LEN ||
+        ssid_size < DB_AP_SSID_LEN) return false;
+    int a = snprintf(suffix, suffix_size, "%02X%02X%02X", mac[3], mac[4], mac[5]);
+    int b = snprintf(device_id, device_id_size, "dragonbench-%s", suffix);
+    int c = snprintf(ssid, ssid_size, "DragonBench-%s", suffix);
+    return a == DB_DEVICE_SUFFIX_LEN - 1 && b > 0 && (size_t)b < device_id_size &&
+           c > 0 && (size_t)c < ssid_size;
+}
+
+bool db_sta_is_configured(const char *ssid) { return ssid && ssid[0] != '\0'; }
+
+bool db_mdns_hostname(const char *configured, const char *device_id, char *out, size_t out_size) {
+    const char *source = (configured && configured[0]) ? configured : device_id;
+    if (!source || !source[0] || !out || out_size == 0) return false;
+    size_t i = 0;
+    for (; source[i] && i + 1 < out_size; ++i)
+        out[i] = (source[i] >= 'A' && source[i] <= 'Z') ? (char)(source[i] - 'A' + 'a') : source[i];
+    out[i] = '\0';
+    return source[i] == '\0';
+}
+
+uint32_t db_sta_retry_delay_ms(unsigned attempt) {
+    if (attempt < DB_STA_FAST_RETRIES) return 0;
+    unsigned step = attempt - DB_STA_FAST_RETRIES;
+    uint32_t delay = DB_STA_BACKOFF_MIN_MS;
+    while (step-- > 0 && delay < DB_STA_BACKOFF_MAX_MS) delay *= 2U;
+    return delay < DB_STA_BACKOFF_MAX_MS ? delay : DB_STA_BACKOFF_MAX_MS;
+}
+
+const char *db_ap_state_name(db_ap_state_t state) {
+    static const char *const names[] = {"starting", "active", "failed"};
+    return state <= DB_AP_FAILED ? names[state] : "unknown";
+}
+
+const char *db_sta_state_name(db_sta_state_t state) {
+    static const char *const names[] = {"unconfigured", "connecting", "connected", "disconnected"};
+    return state <= DB_STA_DISCONNECTED ? names[state] : "unknown";
+}

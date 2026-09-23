@@ -11,8 +11,12 @@ permissions:
 
 jobs:
   esp32s3-build:
-    name: ESP-IDF 5.3.5 / ESP32-S3
+    name: ESP-IDF 5.3.5 / ESP32-S3 ${{ matrix.profile }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [n8r8, tinys3d]
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -22,7 +26,7 @@ jobs:
           esp_idf_version: v5.3.5
           target: esp32s3
           path: .
-          command: bash ci/build-esp32s3.sh
+          command: bash ci/build-esp32s3.sh ${{ matrix.profile }}
 
   python-host:
     name: Python host contracts
@@ -37,7 +41,11 @@ jobs:
       - name: Install tooling dependencies
         run: pip install -r tools/requirements.txt
       - name: Run tests
-        run: python -m unittest discover -s tests -v
+        env:
+          DRAGONBENCH_REQUIRE_NODE: "1"
+        run: |
+          node --version
+          python -m unittest discover -s tests -v
       - name: Run reset characterization tooling tests
         run: python -m unittest tools.tests.test_parsing -v
       - name: Compile Python sources
@@ -62,7 +70,7 @@ jobs:
           gcc -std=c11 -Wall -Wextra -Wpedantic -Werror
           -fsanitize=address,undefined -fno-omit-frame-pointer
           -Ifirmware/common/include
-          firmware/common/db_run.c tests/native/test_db_run.c
+          firmware/common/db_run.c firmware/common/db_network.c tests/native/test_db_run.c
           -o test_db_run
       - name: Execute state-machine test
         run: ./test_db_run

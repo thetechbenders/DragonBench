@@ -400,7 +400,7 @@ def write_summary(records: list[EventRecord], out_dir: Path):
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--port", required=True, help="Serial port of the DUT, e.g. COM11")
-    p.add_argument("--host", default="dragonbench.local", help="DUT HTTP host")
+    p.add_argument("--host", default="192.168.4.1", help="DUT HTTP host")
     p.add_argument("--out-dir", default="artifacts/reset_char", type=Path)
     p.add_argument("--rts-dtr-count", type=int, default=10)
     p.add_argument("--software-count", type=int, default=10)
