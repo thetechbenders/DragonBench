@@ -1,6 +1,7 @@
 #include <inttypes.h>
 #include <netdb.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -445,16 +446,52 @@ static esp_err_t abort_post(httpd_req_t *req) {
     cJSON_AddStringToObject(o, "run_id", id); cJSON_AddStringToObject(o, "state", "aborting"); return send_json(req, o, 200);
 }
 
-static esp_err_t events_get(httpd_req_t *req) {
-    httpd_resp_set_type(req, "application/x-ndjson");
-    xSemaphoreTake(state_lock, portMAX_DELAY);
+// One /api/v1/events response: a copy of the event ring taken under state_lock
+// and transmitted only after the lock is released. HTTP sends can block for the
+// socket send timeout, and state_lock is also taken by should_abort() in every
+// workload loop, so holding it across the network would let a slow or dead
+// client stall running workloads, aborts and event producers.
+typedef struct {
+    size_t count;
+    char json[DB_EVENT_CAPACITY][DB_EVENT_JSON_LEN];
+} event_snapshot_t;
+
+// Caller holds state_lock. Copies the ring oldest-first, as one coherent view.
+static void snapshot_events_locked(event_snapshot_t *snapshot) {
     size_t start = (event_head + DB_EVENT_CAPACITY - event_count) % DB_EVENT_CAPACITY;
+    snapshot->count = event_count;
     for (size_t i = 0; i < event_count; ++i) {
-        db_event_t *event = &events[(start + i) % DB_EVENT_CAPACITY];
-        httpd_resp_send_chunk(req, event->json, HTTPD_RESP_USE_STRLEN);
-        httpd_resp_send_chunk(req, "\n", 1);
+        const char *src = events[(start + i) % DB_EVENT_CAPACITY].json;
+        const char *nul = memchr(src, '\0', DB_EVENT_JSON_LEN - 1);
+        size_t len = nul ? (size_t)(nul - src) : DB_EVENT_JSON_LEN - 1;
+        memcpy(snapshot->json[i], src, len);
+        snapshot->json[i][len] = '\0';
     }
+}
+
+static esp_err_t events_get(httpd_req_t *req) {
+    // Bounded: DB_EVENT_CAPACITY * DB_EVENT_JSON_LEN (~32 KiB), too large for
+    // the httpd task stack; released before returning on every path.
+    event_snapshot_t *snapshot = malloc(sizeof(*snapshot));
+    if (!snapshot) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "{\"error\":\"event snapshot unavailable\"}");
+    }
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    snapshot_events_locked(snapshot);
     xSemaphoreGive(state_lock);
+
+    httpd_resp_set_type(req, "application/x-ndjson");
+    esp_err_t err = ESP_OK;
+    for (size_t i = 0; i < snapshot->count && err == ESP_OK; ++i) {
+        err = httpd_resp_send_chunk(req, snapshot->json[i], HTTPD_RESP_USE_STRLEN);
+        if (err == ESP_OK) err = httpd_resp_send_chunk(req, "\n", 1);
+    }
+    free(snapshot);
+    // A failed send means the client is gone; stop instead of waiting out the
+    // send timeout for every remaining chunk.
+    if (err != ESP_OK) return err;
     return httpd_resp_send_chunk(req, NULL, 0);
 }
 
